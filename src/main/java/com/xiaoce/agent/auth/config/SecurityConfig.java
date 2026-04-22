@@ -1,6 +1,6 @@
 package com.xiaoce.agent.auth.config;
 
-import com.xiaoce.agent.auth.security.JwtAuthenticationFilter;
+import com.xiaoce.agent.auth.security.CustomJwtAuthenticationConverter;
 import com.xiaoce.agent.auth.security.RestAuthenticationEntryPoint;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -11,10 +11,8 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -40,8 +38,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-    // 依赖注入：JWT认证过滤器，用于检查每个请求的token
-    private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    // 依赖注入：自定义JWT认证转换器
+    private final CustomJwtAuthenticationConverter customJwtAuthenticationConverter;
     
     // 依赖注入：认证失败处理器，当token无效时返回401错误
     private final RestAuthenticationEntryPoint restAuthenticationEntryPoint;
@@ -63,7 +61,7 @@ public class SecurityConfig {
      * 3. sessionManagement().stateless()：设置为无状态（不保存session）
      * 4. exceptionHandling()：配置认证失败时的处理
      * 5. authorizeHttpRequests()：配置接口访问权限
-     * 6. addFilterBefore()：添加JWT过滤器到过滤器链
+     * 6. oauth2ResourceServer()：配置OAuth2资源服务器，使用JWT认证
      */
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -91,8 +89,12 @@ public class SecurityConfig {
                         // 其他所有接口都需要认证（需要有效的JWT token）
                         .anyRequest().authenticated())
                 
-                // 添加JWT认证过滤器：在每个请求到达控制器之前检查token
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                // 配置OAuth2资源服务器，使用JWT认证
+                .oauth2ResourceServer(oauth2 -> oauth2
+                        .jwt(jwt -> jwt
+                                .jwtAuthenticationConverter(customJwtAuthenticationConverter)
+                        )
+                );
         
         return http.build();
     }

@@ -140,12 +140,13 @@ public class JwtTokenService {
      * 从JWT中提取用户信息
      * 
      * @param jwt JWT对象
-     * @return JwtUserInfo 用户信息，比如说用户的id以及用户的nickName
+     * @return JwtUserInfo 用户信息，包含用户ID、昵称和角色列表
      */
     public JwtUserInfo extractUserInfo(Jwt jwt) {
         parseAndVerify(jwt.getTokenValue(), jwt.getClaim(TOKEN_TYPE_CLAIM));
         String subject = jwt.getSubject();
         String nickName = jwt.getClaimAsString("nickName");
+        String username = jwt.getClaimAsString("username");
 
         Long userId = null;
         try {
@@ -156,9 +157,45 @@ public class JwtTokenService {
         } catch (NumberFormatException e) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR, "extractUserInfo Failed");
         }
-        List<String> roles = new ArrayList<>();
-        roles.add("ROLE_USER");
-        return new JwtUserInfo(userId, nickName,roles);
+        
+        // 从JWT中提取角色信息
+        List<String> roles = jwt.getClaimAsStringList("roles");
+        if (roles == null || roles.isEmpty()) {
+            roles = new ArrayList<>();
+            roles.add("ROLE_USER");
+        }
+        
+        return new JwtUserInfo(userId, nickName != null ? nickName : username, roles);
+    }
+
+    /**
+     * 创建访问令牌（兼容新架构）
+     * 
+     * @param userId 用户ID
+     * @param username 用户名
+     * @param nickname 昵称
+     * @param roles 角色列表
+     * @return JWT访问令牌
+     */
+    public String createAccessToken(Long userId, String username, String nickname, List<String> roles) {
+        String accessTokenId = UUID.randomUUID().toString();
+        Instant issueAt = Instant.now(clock);
+        Instant expireAt = issueAt.plus(authProperties.getJwt().getAccessTokenTtl());
+        
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer(authProperties.getJwt().getIssuer())
+                .issuedAt(issueAt)
+                .expiresAt(expireAt)
+                .id(accessTokenId)
+                .subject(String.valueOf(userId))
+                .claim("username", username)
+                .claim("nickName", nickname)
+                .claim("roles", roles)
+                .claim(CLAIM_USER_ID, userId)
+                .claim(TOKEN_TYPE_CLAIM, TYPE_ACCESS)
+                .build();
+                
+        return jwtEncoder.encode(JwtEncoderParameters.from(claims)).getTokenValue();
     }
     public String extractJwtType(Jwt jwt){
         return jwt.getClaimAsString(TOKEN_TYPE_CLAIM);
