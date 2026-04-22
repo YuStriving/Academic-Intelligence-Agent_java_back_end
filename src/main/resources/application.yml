@@ -1,0 +1,58 @@
+spring:
+  application:
+    name: agent
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/agent_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: 123456
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6380
+      password: 123456
+      database: 0
+      timeout: 5s
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+
+server:
+  port: 8080
+  servlet:
+    context-path: /
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+  error:
+    include-stacktrace: never
+
+auth:
+  jwt:
+    issuer: academic-agent
+    key-id: academic-agent
+    private-key: classpath:keys/rsa-private.pem
+    public-key: classpath:keys/rsa-public.pem
+    access-token-ttl: PT15M
+    refresh-token-ttl: P7D
+  verification:
+    code-length: 6         # 验证码长度：6位 (如 123456)
+    ttl: PT5M              # 有效期：5分钟 (5分钟内不填就作废)
+    max-attempts: 5        # 最大尝试次数：5次 (输错5次就锁死，防暴力破解)
+    send-interval: PT60S   # 发送间隔：60秒 (点了一次后，60秒内不能再点)
+    daily-limit: 10        # 每日上限：10次 (防止有人恶意刷你的短信费)
+  #  这是 BCrypt 算法的“计算成本”参数。数字越大，加密一次越慢，黑客暴力破解就越难。系统中 “未来注册的所有用户” 的密码管理策略。
+  password:
+    bcrypt-strength: 12
+    min-length: 8   # 最小长度：密码至少8位
+
