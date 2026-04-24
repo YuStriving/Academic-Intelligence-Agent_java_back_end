@@ -27,10 +27,7 @@ import java.security.interfaces.RSAPublicKey;
 public class AuthConfig {
 
     private final AuthProperties authProperties;
-    @Bean
-    public ObjectMapper objectMapper() {
-        return new ObjectMapper();
-    }
+
 
     /**
      * 配置密码加密器

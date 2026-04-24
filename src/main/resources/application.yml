@@ -37,6 +37,33 @@ server:
   error:
     include-stacktrace: never
 
+# 日志配置
+logging:
+  level:
+    # 根日志级别
+    root: INFO
+    # 应用包日志级别
+    com.xiaoce.agent: DEBUG
+    com.xiaoce.agent.auth: DEBUG
+    # Spring框架日志级别
+    org.springframework: WARN
+    org.springframework.security: DEBUG
+    org.springframework.web: DEBUG
+    # 数据库相关日志
+    org.hibernate: WARN
+    org.mybatis: DEBUG
+    # Redis相关日志
+    org.springframework.data.redis: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/agent.log
+  logback:
+    rollingpolicy:
+      max-file-size: 10MB
+      max-history: 30
+
 auth:
   jwt:
     issuer: academic-agent
@@ -55,4 +82,19 @@ auth:
   password:
     bcrypt-strength: 12
     min-length: 8   # 最小长度：密码至少8位
+    max-length: 12
+
+oss:
+  endpoint:
+  access-key-id:
+  access-key-secret:
+  bucket-name:
+
+# 配置 MP 日志（可选，方便查看生成的 SQL）
+mybatis-plus:
+  mapper-locations: classpath:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+
 

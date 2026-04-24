@@ -1,6 +1,6 @@
 package com.xiaoce.agent.auth.config;
 
-import com.xiaoce.agent.auth.security.CustomJwtAuthenticationConverter;
+import com.xiaoce.agent.auth.security.JwtAuthenticationConverter;
 import com.xiaoce.agent.auth.security.RestAuthenticationEntryPoint;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -11,7 +11,6 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -38,17 +37,14 @@ import java.util.List;
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-    // 依赖注入：自定义JWT认证转换器
-    private final CustomJwtAuthenticationConverter customJwtAuthenticationConverter;
-    
     // 依赖注入：认证失败处理器，当token无效时返回401错误
     private final RestAuthenticationEntryPoint restAuthenticationEntryPoint;
     
     // 依赖注入：CORS跨域配置属性
     private final AppCorsProperties corsProperties;
     
-    // 依赖注入：认证相关配置属性
-    private final AuthProperties authProperties;
+    // 依赖注入：自定义JWT认证转换器
+    private final JwtAuthenticationConverter jwtAuthenticationConverter;
 
     /**
      * 配置安全过滤器链 - 这是整个安全系统的核心配置
@@ -84,17 +80,13 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         
                         // 公开接口：注册、登录、刷新token不需要认证
-                        .requestMatchers("/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh").permitAll()
+                        .requestMatchers("/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/logout", "/api/v1/auth/logout/all").permitAll()
                         
                         // 其他所有接口都需要认证（需要有效的JWT token）
                         .anyRequest().authenticated())
                 
                 // 配置OAuth2资源服务器，使用JWT认证
-                .oauth2ResourceServer(oauth2 -> oauth2
-                        .jwt(jwt -> jwt
-                                .jwtAuthenticationConverter(customJwtAuthenticationConverter)
-                        )
-                );
+                .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)));
         
         return http.build();
     }

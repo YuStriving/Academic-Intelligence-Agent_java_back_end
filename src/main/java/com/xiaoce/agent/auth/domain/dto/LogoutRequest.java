@@ -1,13 +1,9 @@
 package com.xiaoce.agent.auth.domain.dto;
 
 import jakarta.validation.constraints.NotBlank;
-import lombok.Data;
 
-
-public record RefreshRequest(
+public record LogoutRequest(
         @NotBlank(message = "Refresh token is required")
         String refreshToken
 ) {
-
-
 }

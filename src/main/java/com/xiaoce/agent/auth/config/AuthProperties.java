@@ -36,5 +36,6 @@ public class AuthProperties {
     public static class Password {
         private int bcryptStrength = 12;
         private int minLength = 8;
+        private int maxLength = 12;
     }
 }

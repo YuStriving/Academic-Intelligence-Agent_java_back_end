@@ -1,27 +1,40 @@
 package com.xiaoce.agent.auth.common.utils;
 
+import java.time.Year;
 import java.util.UUID;
 
-/**
- * GenerateUserInfo
- * <p>
- * TODO: 请在此处简要描述类的功能
- *
- * @author 小策
- * @date 2026/4/22 16:25
- */
-public class GenerateUserInfo {
-    public GenerateUserInfo(){
+public final class GenerateUserInfo {
 
+    private GenerateUserInfo() {
     }
-/**
- * 生成用户昵称的方法
- * @return 返回一个以"学术用户："为前缀，加上8位UUID随机字符串组成的昵称
- */
-    public static String generateUserNickName(){
-    // 生成一个UUID随机字符串，并截取前8位
+
+    public static String generateUserNickName() {
         String uuid = UUID.randomUUID().toString().substring(0, 8);
-    // 拼接前缀并返回最终生成的用户昵称
-        return "学术用户： " + uuid;
+        return "学术用户:" + uuid;
+    }
+
+    public static String getAvatarUrl() {
+        return "https://xiaoce-zhiguang.oss-cn-shenzhen.aliyuncs.com/default.jpg";
+    }
+
+    public static String getBio() {
+        return "这个人很懒，什么都没有留下";
+    }
+
+    public static String getSchool() {
+        return "未认证用户";
+    }
+
+    public static String getAcademicId() {
+        int year = Year.now().getValue() % 100;
+        String yearPart = String.format("%02d", year);
+        long timestampPart = System.currentTimeMillis() % 1_000_000;
+        int randomPart = (int) (Math.random() * 1000);
+        String uniquePart = String.format("%06d", (timestampPart + randomPart) % 1_000_000);
+        return yearPart + uniquePart;
+    }
+
+    public static String getDefaultPassword() {
+        return "123456";
     }
 }

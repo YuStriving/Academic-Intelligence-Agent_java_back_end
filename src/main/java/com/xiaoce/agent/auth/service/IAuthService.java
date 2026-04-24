@@ -1,12 +1,12 @@
 package com.xiaoce.agent.auth.service;
 
 import com.xiaoce.agent.auth.domain.dto.LoginRequest;
+import com.xiaoce.agent.auth.domain.dto.RefreshRequest;
 import com.xiaoce.agent.auth.domain.dto.RegisterRequest;
-import com.xiaoce.agent.auth.domain.dto.TokenRefreshRequest;
 import com.xiaoce.agent.auth.domain.vo.AuthResponse;
 import com.xiaoce.agent.auth.domain.vo.TokenPairResponse;
+import com.xiaoce.agent.auth.domain.vo.UserInfoResponse;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 
 /**
  * IAuthService
@@ -22,13 +22,15 @@ public interface IAuthService {
 
     AuthResponse register(RegisterRequest req);
 
-    void logout(@NotBlank(message = "刷新令牌不能为空") String refreshToken);
+    void logout(String refreshToken);
 
-    TokenPairResponse refreshToken(@Valid TokenRefreshRequest request);
+    TokenPairResponse refreshToken(@Valid RefreshRequest request);
 
+    UserInfoResponse me(Long userId);
 
-
-
+    void logoutAll(String refreshToken);
+    // TODO 永久封禁用户
+    void banUserPermanent(Long userId);
 
 
 }

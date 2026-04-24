@@ -1,34 +1,34 @@
 package com.xiaoce.agent.auth.service.impl;
 
+import com.xiaoce.agent.auth.common.exception.BusinessException;
+import com.xiaoce.agent.auth.common.exception.ErrorCode;
 import com.xiaoce.agent.auth.config.AuthProperties;
-
 import com.xiaoce.agent.auth.domain.dto.JwtUserInfo;
 import com.xiaoce.agent.auth.domain.po.User;
 import com.xiaoce.agent.auth.domain.vo.TokenPair;
-import com.xiaoce.agent.auth.common.exception.BusinessException;
-import com.xiaoce.agent.auth.common.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class JwtTokenService {
 
-    private static final String TOKEN_TYPE_CLAIM = "token_type";
-    private static final String TYPE_ACCESS = "access";
-    private static final String TYPE_REFRESH = "refresh";
-    private static final String CLAIM_USER_ID = "uid";
+    public static final String CLAIM_TOKEN_TYPE = "token_type";
+    public static final String TYPE_ACCESS = "access";
+    public static final String TYPE_REFRESH = "refresh";
+    public static final String CLAIM_USER_ID = "uid";
+    public static final String CLAIM_TOKEN_VERSION = "tv";
 
     private final AuthProperties authProperties;
     private final JwtEncoder jwtEncoder;
@@ -36,180 +36,126 @@ public class JwtTokenService {
 
     private final Clock clock = Clock.systemUTC();
 
+    public TokenPair issueTokenPair(User user, long tokenVersion) {
+        Instant issueAt = Instant.now(clock);
+        Instant accessExpiresAt = issueAt.plus(authProperties.getJwt().getAccessTokenTtl());
+        Instant refreshExpiresAt = issueAt.plus(authProperties.getJwt().getRefreshTokenTtl());
 
-    public String createAccessToken(String accessTokenId , User user , Instant issueAt, Instant expireAt, String tokenType, List<String> roles){
+        String accessTokenId = UUID.randomUUID().toString();
+        String refreshTokenId = UUID.randomUUID().toString();
+
+        String accessToken = createAccessToken(accessTokenId, user, issueAt, accessExpiresAt, tokenVersion);
+        String refreshToken = createRefreshToken(refreshTokenId, user, issueAt, refreshExpiresAt, tokenVersion);
+
+        return new TokenPair(accessToken, accessExpiresAt, refreshToken, refreshExpiresAt, refreshTokenId);
+    }
+
+    public Jwt parseAndVerify(String token, String expectedType) {
+        try {
+            Jwt jwt = jwtDecoder.decode(token);
+            validateCommonClaims(jwt, expectedType);
+            return jwt;
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw invalidTokenError(expectedType);
+        }
+    }
+
+    public JwtUserInfo extractUserInfo(Jwt jwt) {
+        Long userId = parseSubjectAsUserId(jwt.getSubject());
+        String nickName = jwt.getClaimAsString("nickName");
+        String username = jwt.getClaimAsString("username");
+        return new JwtUserInfo(userId, nickName != null ? nickName : username);
+    }
+
+    public String extractJwtId(Jwt jwt) {
+        return jwt.getId();
+    }
+
+    public long extractTokenVersion(Jwt jwt) {
+        Object raw = jwt.getClaims().get(CLAIM_TOKEN_VERSION);
+        if (raw == null) {
+            return 0L;
+        }
+        if (raw instanceof Number number) {
+            return number.longValue();
+        }
+        if (raw instanceof String str) {
+            try {
+                return Long.parseLong(str);
+            } catch (NumberFormatException e) {
+                throw new BusinessException(ErrorCode.UNAUTHORIZED, "Invalid token version");
+            }
+        }
+        throw new BusinessException(ErrorCode.UNAUTHORIZED, "Invalid token version");
+    }
+
+    public void assertTokenVersion(Jwt jwt, long currentVersion, String expectedType) {
+        long tokenVersion = extractTokenVersion(jwt);
+        if (tokenVersion != currentVersion) {
+            throw invalidTokenError(expectedType);
+        }
+    }
+
+    public Long parseSubjectAsUserId(String subject) {
+        if (subject == null || subject.isBlank()) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED, "Invalid token subject");
+        }
+        try {
+            long userId = Long.parseLong(subject);
+            if (userId <= 0) {
+                throw new BusinessException(ErrorCode.UNAUTHORIZED, "Invalid token subject");
+            }
+            return userId;
+        } catch (NumberFormatException e) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED, "Invalid token subject");
+        }
+    }
+
+    private String createAccessToken(String accessTokenId, User user, Instant issueAt, Instant expireAt, long tokenVersion) {
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer(authProperties.getJwt().getIssuer())
                 .issuedAt(issueAt)
                 .expiresAt(expireAt)
-                .id( accessTokenId)
+                .id(accessTokenId)
                 .subject(String.valueOf(user.getId()))
                 .claim("nickName", user.getNickname())
-                .claim("roles", roles)
-                .claim(CLAIM_USER_ID,user.getId())
-                .claim(TOKEN_TYPE_CLAIM, tokenType)
+                .claim(CLAIM_USER_ID, user.getId())
+                .claim(CLAIM_TOKEN_TYPE, TYPE_ACCESS)
+                .claim(CLAIM_TOKEN_VERSION, tokenVersion)
                 .build();
         return jwtEncoder.encode(JwtEncoderParameters.from(claims)).getTokenValue();
     }
 
-
-    public String createRefreshToken(String refreshTokenId , User user , Instant issueAt,Instant expireAt,String tokenType,List<String> roles){
+    private String createRefreshToken(String refreshTokenId, User user, Instant issueAt, Instant expireAt, long tokenVersion) {
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer(authProperties.getJwt().getIssuer())
                 .issuedAt(issueAt)
                 .expiresAt(expireAt)
                 .subject(String.valueOf(user.getId()))
                 .id(refreshTokenId)
-                .claim(TOKEN_TYPE_CLAIM, tokenType)
-                .claim("roles", roles)
-                .claim(CLAIM_USER_ID,user.getId())
-
+                .claim(CLAIM_TOKEN_TYPE, TYPE_REFRESH)
+                .claim(CLAIM_USER_ID, user.getId())
+                .claim(CLAIM_TOKEN_VERSION, tokenVersion)
                 .build();
-                
         return jwtEncoder.encode(JwtEncoderParameters.from(claims)).getTokenValue();
-
     }
 
-    /**
-     * 为用户颁发访问令牌和刷新令牌对
-     * @param user 用户对象，包含用户相关信息
-     * @return TokenPair 包含访问令牌和刷新令牌的对象
-     */
-    public TokenPair issueTokenPair(User user){
-        // 生成刷新令牌的唯一标识符
-        String refreshTokenId = UUID.randomUUID().toString();
-        // 生成访问令牌的唯一标识符
-        String accessTokenId = UUID.randomUUID().toString();
-        // 获取当前时间作为令牌颁发时间
-        Instant issueAt = Instant.now(clock);
-        // 计算访问令牌的过期时间（基于配置的TTL）
-        Instant accessExpiresAt = issueAt.plus(authProperties.getJwt().getAccessTokenTtl());
-        // 计算刷新令牌的过期时间（基于配置的TTL）
-        Instant refreshExpiresAt = issueAt.plus(authProperties.getJwt().getRefreshTokenTtl());
-        // 获取用户的角色列表
-
-        // 生成访问令牌
-        String accessToken = createAccessToken(accessTokenId, user, issueAt, accessExpiresAt, TYPE_ACCESS);
-        // 生成刷新令牌
-        String refreshToken = createRefreshToken(refreshTokenId, user, issueAt, accessExpiresAt, TYPE_REFRESH);
-        // 创建并返回包含令牌信息的TokenPair对象
-        return new TokenPair(accessToken, accessExpiresAt, refreshToken, refreshExpiresAt,refreshTokenId);
-    }
-
-   public Jwt decodeJwt(String token){
-        return  jwtDecoder.decode(token);
-   }
-
-    /**
-     * 解析并验证JWT令牌
-     * 
-     * @param token JWT令牌
-     * @param expectedType 期望的令牌类型
-     * @return Jwt 解析后的JWT对象
-     */
-    public Jwt parseAndVerify(String token, String expectedType) {
-        try {
-            Jwt jwt = jwtDecoder.decode(token);
-            
-            // 验证令牌类型
-            String tokenType = jwt.getClaimAsString(TOKEN_TYPE_CLAIM);
-            if (!expectedType.equals(tokenType)) {
-                throw invalidTokenError(expectedType);
-            }
-            
-            // 验证发行者
-            String issuer = jwt.getIssuer() != null ? jwt.getIssuer().toString() : null;
-            if (!authProperties.getJwt().getIssuer().equals(issuer)) {
-                throw invalidTokenError(expectedType);
-            }
-            
-            // 验证主题
-            String subject = jwt.getSubject();
-            if (subject == null || subject.isBlank()) {
-                throw invalidTokenError(expectedType);
-            }
-            
-            return jwt;
-            
-        } catch (Exception e) {
+    private void validateCommonClaims(Jwt jwt, String expectedType) {
+        String tokenType = jwt.getClaimAsString(CLAIM_TOKEN_TYPE);
+        if (!expectedType.equals(tokenType)) {
             throw invalidTokenError(expectedType);
         }
-    }
 
-    /**
-     * 从JWT中提取用户信息
-     * 
-     * @param jwt JWT对象
-     * @return JwtUserInfo 用户信息，包含用户ID、昵称和角色列表
-     */
-    public JwtUserInfo extractUserInfo(Jwt jwt) {
-        parseAndVerify(jwt.getTokenValue(), jwt.getClaim(TOKEN_TYPE_CLAIM));
-        String subject = jwt.getSubject();
-        String nickName = jwt.getClaimAsString("nickName");
-        String username = jwt.getClaimAsString("username");
-
-        Long userId = null;
-        try {
-            userId = Long.parseLong(subject);
-            if (userId == null || userId <= 0) {
-                throw new BusinessException(ErrorCode.INTERNAL_ERROR, "userId is inValid");
-            }
-        } catch (NumberFormatException e) {
-            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "extractUserInfo Failed");
+        String issuer = jwt.getIssuer() == null ? null : jwt.getIssuer().toString();
+        if (!authProperties.getJwt().getIssuer().equals(issuer)) {
+            throw invalidTokenError(expectedType);
         }
-        
-        // 从JWT中提取角色信息
-        List<String> roles = jwt.getClaimAsStringList("roles");
-        if (roles == null || roles.isEmpty()) {
-            roles = new ArrayList<>();
-            roles.add("ROLE_USER");
-        }
-        
-        return new JwtUserInfo(userId, nickName != null ? nickName : username, roles);
+
+        parseSubjectAsUserId(jwt.getSubject());
     }
 
-    /**
-     * 创建访问令牌（兼容新架构）
-     * 
-     * @param userId 用户ID
-     * @param username 用户名
-     * @param nickname 昵称
-     * @param roles 角色列表
-     * @return JWT访问令牌
-     */
-    public String createAccessToken(Long userId, String username, String nickname, List<String> roles) {
-        String accessTokenId = UUID.randomUUID().toString();
-        Instant issueAt = Instant.now(clock);
-        Instant expireAt = issueAt.plus(authProperties.getJwt().getAccessTokenTtl());
-        
-        JwtClaimsSet claims = JwtClaimsSet.builder()
-                .issuer(authProperties.getJwt().getIssuer())
-                .issuedAt(issueAt)
-                .expiresAt(expireAt)
-                .id(accessTokenId)
-                .subject(String.valueOf(userId))
-                .claim("username", username)
-                .claim("nickName", nickname)
-                .claim("roles", roles)
-                .claim(CLAIM_USER_ID, userId)
-                .claim(TOKEN_TYPE_CLAIM, TYPE_ACCESS)
-                .build();
-                
-        return jwtEncoder.encode(JwtEncoderParameters.from(claims)).getTokenValue();
-    }
-    public String extractJwtType(Jwt jwt){
-        return jwt.getClaimAsString(TOKEN_TYPE_CLAIM);
-    }
-    public String extractJwtId(Jwt jwt){
-        return jwt.getId();
-    }
-
-    /**
-     * 根据令牌类型创建相应的业务异常
-     * 
-     * @param expectedType 期望的令牌类型
-     * @return BusinessException 业务异常
-     */
     private BusinessException invalidTokenError(String expectedType) {
         if (TYPE_REFRESH.equals(expectedType)) {
             return new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN);

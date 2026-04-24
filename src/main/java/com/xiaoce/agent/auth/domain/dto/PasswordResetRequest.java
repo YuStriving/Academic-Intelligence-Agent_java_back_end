@@ -2,22 +2,14 @@ package com.xiaoce.agent.auth.domain.dto;
 
 import jakarta.validation.constraints.NotBlank;
 
-/**
- * PasswordResetRequest
- * <p>
- * TODO: 请在此处简要描述类的功能
- *
- * @author 小策
- * @date 2026/4/22 12:42
- */
 public record PasswordResetRequest(
-        @NotBlank(message =  "邮箱或者用户名不能为空")
+        @NotBlank(message = "Email or username is required")
         String emailOrUsername,
-        @NotBlank(message = "密码不能为空")
+        @NotBlank(message = "Password is required")
         String password,
-        @NotBlank(message = "新密码不能为空")
+        @NotBlank(message = "New password is required")
         String newPassword,
-        @NotBlank(message = "验证码不能为空")
+        @NotBlank(message = "Verification code is required")
         String code
 ) {
 }

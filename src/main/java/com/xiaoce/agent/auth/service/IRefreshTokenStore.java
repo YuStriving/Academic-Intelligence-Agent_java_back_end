@@ -1,6 +1,7 @@
 package com.xiaoce.agent.auth.service;
 
 import java.time.Duration;
+import java.time.Instant;
 
 /**
  * RefreshTokenStore
@@ -11,11 +12,14 @@ import java.time.Duration;
  * @date 2026/4/22 9:52
  */
 public interface IRefreshTokenStore {
-    void saveRefreshToken(Long userId, String tokenId, Duration ttl);
 
-    boolean validateRefreshTokenOwnership(Long userId, String tokenId);
+    void saveRefreshToken(Long userId, String tokenId, Instant ttl);
+
+    boolean validateRefreshToken(Long userId, String tokenId);
 
     void removeRefreshToken(Long userId, String tokenId);
 
     void removeUserAllRefreshToken(Long userId);
+
+
 }
