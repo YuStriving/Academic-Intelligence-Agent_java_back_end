@@ -52,12 +52,13 @@ public class RefreshTokenStoreImpl implements IRefreshTokenStore {
      * 如果验证成功返回1，否则返回0。
      */
     private static final String VALIDATE_SCRIPT =
-            "local userInfo = redis.call('HGET', KEYS[1], ARGV[1])\n" +
-            "if not userInfo then return 0 end\n" +
-            "local sep = string.find(userInfo, '|')\n" +
-            "if not sep then return 0 end\n" +
-            "local userId = string.sub(userInfo, 1, sep - 1)\n" +
-            "if userId == ARGV[2] then return 1 else return 0 end";
+                    "if redis.call('EXISTS', KEYS[2]) == 0 then return 0 end\n" +
+                    "local userInfo = redis.call('HGET', KEYS[1], ARGV[1])\n" +
+                    "if not userInfo then return 0 end\n" +
+                    "local sep = string.find(userInfo, '|')\n" +
+                    "if not sep then return 0 end\n" +
+                    "local userId = string.sub(userInfo, 1, sep - 1)\n" +
+                    "if userId == ARGV[2] then return 1 else return 0 end";
 
     /**
      * 删除刷新令牌的Lua脚本
@@ -153,15 +154,6 @@ public class RefreshTokenStoreImpl implements IRefreshTokenStore {
         if (userId == null || jti == null) {
             throw new IllegalArgumentException("userId and jti cannot be null");
         }
-
-        // 先检查过期标记是否存在
-        Boolean hasExpireKey = redisTemplate.hasKey(jtiExpireKey(jti));
-        if (hasExpireKey == null || !hasExpireKey) {
-            log.debug("刷新令牌验证失败 - 过期标记不存在, 用户ID: {}, 令牌ID: {}", 
-                    userId, jti);
-            return false;
-        }
-
         // 使用Lua脚本原子性地验证令牌
         DefaultRedisScript<Long> script = new DefaultRedisScript<>();
         script.setScriptText(VALIDATE_SCRIPT);
@@ -169,7 +161,7 @@ public class RefreshTokenStoreImpl implements IRefreshTokenStore {
 
         Long result = redisTemplate.execute(
                 script,
-                Collections.singletonList(MAIN_HASH_KEY_PREFIX),
+                Arrays.asList(MAIN_HASH_KEY_PREFIX, jtiExpireKey(jti)),
                 jti,
                 String.valueOf(userId)
         );

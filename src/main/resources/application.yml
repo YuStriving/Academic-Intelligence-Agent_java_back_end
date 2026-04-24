@@ -60,7 +60,7 @@ auth:
     issuer: academic-agent
     key-id: academic-agent
     private-key: classpath:keys/rsa-private.pem
-    public-key: classpath:keys/rsa-private.pem
+    public-key: classpath:keys/rsa-public.pem
     access-token-ttl: PT15M
     refresh-token-ttl: P7D
   verification:
