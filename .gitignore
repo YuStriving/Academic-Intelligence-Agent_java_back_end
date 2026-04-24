@@ -50,12 +50,17 @@ logs/
 *.sqlite
 
 # Application properties
-application*.properties
-application*.yml
-
-# Spring Boot
+# 私有开发环境配置（包含敏感信息，不上传GitHub）
+application-dev.properties
+application-dev.yml
+application-local.properties
+application-local.yml
+application-prod.properties
+application-prod.yml
+# 公开基础配置（可以上传GitHub）
 !/src/main/resources/application.properties
 !/src/main/resources/application.yml
+!/src/main/resources/application-example.yml
 
 # Docker
 .docker/
