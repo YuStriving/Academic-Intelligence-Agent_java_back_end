@@ -1,9 +1,7 @@
 package com.xiaoce.agent.auth.controller;
 
-import com.xiaoce.agent.auth.domain.dto.LoginRequest;
-import com.xiaoce.agent.auth.domain.dto.LogoutRequest;
-import com.xiaoce.agent.auth.domain.dto.RefreshRequest;
-import com.xiaoce.agent.auth.domain.dto.RegisterRequest;
+
+import com.xiaoce.agent.auth.domain.dto.*;
 import com.xiaoce.agent.auth.security.JwtAuthenticationToken;
 import com.xiaoce.agent.auth.service.IAuthService;
 import com.xiaoce.agent.auth.domain.vo.AuthResponse;
@@ -178,25 +176,11 @@ public class AuthController {
         }
     }
 
-    /**
-     * 用户全设备登出接口
-     * 
-     * <p>使该用户所有设备的刷新令牌失效，增加令牌版本号，所有旧令牌都将失效。
-     * 用户需要在所有设备上重新登录。
-     * 
-     * <p>使用场景：
-     * <ul>
-     *   <li>怀疑账户被盗用，强制所有设备重新登录</li>
-     *   <li>修改密码后，希望旧令牌全部失效</li>
-     * </ul>
-     * 
-     * @param request 登出请求，包含刷新令牌
-     * @return 空的成功响应
-     */
-    @PostMapping("/logout/all")
-    public ApiResponse<Void> logoutAll(@Valid @RequestBody LogoutRequest request) {
-        log.info("用户全设备下线请求");
-        authService.logoutAll(request.refreshToken());
+
+    @PostMapping("/reset/password")
+    public ApiResponse<Void> resetPassword(@Valid @RequestBody PasswordResetRequest request) {
+        log.info("更新密码请求");
+        authService.resetPassword(request);
         return ApiResponse.ok();
     }
 }

@@ -7,279 +7,219 @@ import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
-import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
 
-import static com.xiaoce.agent.auth.common.constant.RefreshToken.MAIN_HASH_KEY_PREFIX;
-import static com.xiaoce.agent.auth.common.constant.RefreshToken.TOKEN_KEY_PREFIX;
-import static com.xiaoce.agent.auth.common.constant.RefreshToken.USER_SET_KEY_PREFIX;
+import static com.xiaoce.agent.auth.common.constant.AuthRedisConstants.GLOBAL_EXPIRY_ZSET_KEY;
+import static com.xiaoce.agent.auth.common.constant.AuthRedisConstants.TOKEN_KEY_PREFIX;
+import static com.xiaoce.agent.auth.common.constant.AuthRedisConstants.USER_SET_KEY_PREFIX;
 
-/**
- * 刷新令牌Redis存储实现
- * 
- * <p>使用Redis存储和管理用户的刷新令牌，支持令牌的保存、验证、删除和全设备登出功能。
- * 使用Redis的Hash、Set和String三种数据结构，保证操作的原子性和高效性。
- * 
- * <p>数据结构：
- * <ul>
- *   <li>Hash: 存储令牌ID到用户ID的映射</li>
- *   <li>Set: 存储用户拥有的所有令牌ID</li>
- *   <li>String: 存储令牌ID到过期标记，带有过期时间</li>
- * </ul>
- * 
- * <p>使用场景：
- * <ul>
- *   <li>用户登录成功后保存刷新令牌</li>
- *   <li>刷新令牌时验证令牌有效性</li>
- *   <li>用户登出时删除刷新令牌</li>
- *   <li>全设备登出时删除用户所有令牌</li>
- * </ul>
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class RefreshTokenStoreImpl implements IRefreshTokenStore {
 
-    /**
-     * 验证刷新令牌的Lua脚本
-     * 
-     * <p>原子性地从Hash中获取令牌对应的用户ID，并验证是否匹配。
-     * 如果验证成功返回1，否则返回0。
-     */
-    private static final String VALIDATE_SCRIPT =
-                    "if redis.call('EXISTS', KEYS[2]) == 0 then return 0 end\n" +
-                    "local userInfo = redis.call('HGET', KEYS[1], ARGV[1])\n" +
-                    "if not userInfo then return 0 end\n" +
-                    "local sep = string.find(userInfo, '|')\n" +
-                    "if not sep then return 0 end\n" +
-                    "local userId = string.sub(userInfo, 1, sep - 1)\n" +
-                    "if userId == ARGV[2] then return 1 else return 0 end";
+    private static final String USER_TOKEN_KEY_SUFFIX = ":tokens";
+    private static final String GLOBAL_MEMBER_SEPARATOR = "|";
+    private static final int DEFAULT_CLEANUP_BATCH_SIZE = 200;
 
-    /**
-     * 删除刷新令牌的Lua脚本
-     * 
-     * <p>原子性地从Hash、Set和String中删除令牌相关数据。
-     * 返回1表示成功。
-     */
-    private static final String DEL_SCRIPT =
-            "redis.call('HDEL', KEYS[1], ARGV[1])\n" +
-            "redis.call('SREM', KEYS[2], ARGV[1])\n" +
-            "redis.call('DEL', KEYS[3])\n" +
-            "return 1";
+    private static final DefaultRedisScript<Long> SAVE_SCRIPT = longScript(
+            "redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[3])\n" +
+            "redis.call('ZADD', KEYS[2], ARGV[2], ARGV[4])\n" +
+            "redis.call('ZADD', KEYS[3], ARGV[2], ARGV[5])\n" +
+            "local currentTtl = redis.call('TTL', KEYS[2])\n" +
+            "local desiredTtl = tonumber(ARGV[3])\n" +
+            "if currentTtl < desiredTtl then redis.call('EXPIRE', KEYS[2], desiredTtl) end\n" +
+            "return 1"
+    );
+
+    private static final DefaultRedisScript<Long> VALIDATE_SCRIPT = longScript(
+            "local owner = redis.call('GET', KEYS[1])\n" +
+            "if not owner then\n" +
+            "  redis.call('ZREM', KEYS[2], ARGV[2])\n" +
+            "  redis.call('ZREM', KEYS[3], ARGV[3])\n" +
+            "  return 0\n" +
+            "end\n" +
+            "if owner ~= ARGV[1] then return 0 end\n" +
+            "return 1"
+    );
+
+    private static final DefaultRedisScript<Long> REMOVE_SCRIPT = longScript(
+            "local owner = redis.call('GET', KEYS[1])\n" +
+            "if owner and owner ~= ARGV[1] then return -1 end\n" +
+            "redis.call('DEL', KEYS[1])\n" +
+            "redis.call('ZREM', KEYS[2], ARGV[2])\n" +
+            "redis.call('ZREM', KEYS[3], ARGV[3])\n" +
+            "if owner then return 1 else return 0 end"
+    );
+
+    private static final DefaultRedisScript<Long> CLEANUP_BATCH_SCRIPT = longScript(
+            "local members = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, ARGV[2])\n" +
+            "for _, member in ipairs(members) do\n" +
+            "  local sep = string.find(member, ARGV[6], 1, true)\n" +
+            "  if sep then\n" +
+            "    local userId = string.sub(member, 1, sep - 1)\n" +
+            "    local jti = string.sub(member, sep + 1)\n" +
+            "    redis.call('DEL', ARGV[3] .. jti)\n" +
+            "    redis.call('ZREM', ARGV[4] .. userId .. ARGV[5], jti)\n" +
+            "  end\n" +
+            "  redis.call('ZREM', KEYS[1], member)\n" +
+            "end\n" +
+            "return #members"
+    );
 
     private final StringRedisTemplate redisTemplate;
 
-    /**
-     * 保存刷新令牌
-     * 
-     * <p>原子性地将刷新令牌信息保存到Redis的三个数据结构中：
-     * <ul>
-     *   <li>Hash: 令牌ID -> 用户ID|时间戳</li>
-     *   <li>Set: 用户ID -> 令牌ID集合</li>
-     *   <li>String: 令牌ID -> "1" (带过期时间)</li>
-     * </ul>
-     * 
-     * <p>使用场景：
-     * <ul>
-     *   <li>用户登录成功后保存刷新令牌</li>
-     *   <li>刷新令牌成功后保存新的刷新令牌</li>
-     * </ul>
-     * 
-     * @param userId 用户ID
-     * @param jti 令牌ID
-     * @param expireAt 过期时间
-     */
     @Override
     public void saveRefreshToken(Long userId, String jti, Instant expireAt) {
-        // 计算过期秒数，确保至少为1秒
+        requireArgs(userId, jti, expireAt);
+
         long ttlSeconds = Math.max(1L, Duration.between(Instant.now(), expireAt).toSeconds());
-        
-        // 使用Redis管道原子性地执行多个操作
-        redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
-            String compressedUserInfo = userId + "|" + System.currentTimeMillis();
+        long expireAtEpochSeconds = expireAt.getEpochSecond();
 
-            // 1. 保存到Hash: 令牌ID -> 用户信息
-            connection.hashCommands().hSet(
-                    MAIN_HASH_KEY_PREFIX.getBytes(StandardCharsets.UTF_8),
-                    jti.getBytes(StandardCharsets.UTF_8),
-                    compressedUserInfo.getBytes(StandardCharsets.UTF_8)
-            );
+        Long saved = redisTemplate.execute(
+                SAVE_SCRIPT,
+                Arrays.asList(jtiTokenKey(jti), userTokenZsetKey(userId), GLOBAL_EXPIRY_ZSET_KEY),
+                String.valueOf(userId),
+                String.valueOf(expireAtEpochSeconds),
+                String.valueOf(ttlSeconds),
+                jti,
+                globalMember(userId, jti)
+        );
 
-            // 2. 保存到Set: 用户ID -> 令牌ID集合
-            connection.setCommands().sAdd(
-                    userSetKey(userId).getBytes(StandardCharsets.UTF_8),
-                    jti.getBytes(StandardCharsets.UTF_8)
-            );
-
-            // 3. 保存到String: 令牌ID -> "1" (带过期时间)
-            connection.stringCommands().setEx(
-                    jtiExpireKey(jti).getBytes(StandardCharsets.UTF_8),
-                    ttlSeconds,
-                    "1".getBytes(StandardCharsets.UTF_8)
-            );
-
-            return null;
-        });
-
-        log.debug("刷新令牌保存成功 - 用户ID: {}, 令牌ID: {}, 过期时间: {}s", 
-                userId, jti, ttlSeconds);
+        if (saved == null || saved != 1L) {
+            throw new IllegalStateException("Failed to save refresh token");
+        }
     }
 
-    /**
-     * 验证刷新令牌
-     * 
-     * <p>验证刷新令牌是否有效，分为两步：
-     * <ol>
-     *   <li>检查String类型的过期标记是否存在</li>
-     *   <li>使用Lua脚本原子性地验证Hash中的用户ID是否匹配</li>
-     * </ol>
-     * 
-     * <p>使用场景：
-     * <ul>
-     *   <li>刷新令牌时验证令牌是否有效</li>
-     *   <li>用户登出时验证令牌是否有效</li>
-     * </ul>
-     * 
-     * @param userId 用户ID
-     * @param jti 令牌ID
-     * @return 令牌是否有效
-     */
     @Override
     public boolean validateRefreshToken(Long userId, String jti) {
-        if (userId == null || jti == null) {
-            throw new IllegalArgumentException("userId and jti cannot be null");
-        }
-        // 使用Lua脚本原子性地验证令牌
-        DefaultRedisScript<Long> script = new DefaultRedisScript<>();
-        script.setScriptText(VALIDATE_SCRIPT);
-        script.setResultType(Long.class);
+        requireArgs(userId, jti, Instant.now());
 
         Long result = redisTemplate.execute(
-                script,
-                Arrays.asList(MAIN_HASH_KEY_PREFIX, jtiExpireKey(jti)),
+                VALIDATE_SCRIPT,
+                Arrays.asList(jtiTokenKey(jti), userTokenZsetKey(userId), GLOBAL_EXPIRY_ZSET_KEY),
+                String.valueOf(userId),
                 jti,
-                String.valueOf(userId)
+                globalMember(userId, jti)
         );
-        
-        boolean isValid = result != null && result == 1;
-        
-        log.debug("刷新令牌验证结果 - 用户ID: {}, 令牌ID: {}, 结果: {}", 
-                userId, jti, isValid);
-        
-        return isValid;
+        return result != null && result == 1L;
     }
 
-    /**
-     * 删除刷新令牌
-     * 
-     * <p>原子性地从Redis的三个数据结构中删除刷新令牌相关数据：
-     * <ul>
-     *   <li>从Hash中删除令牌ID到用户信息的映射</li>
-     *   <li>从Set中删除用户拥有的令牌ID</li>
-     *   <li>从String中删除过期标记</li>
-     * </ul>
-     * 
-     * <p>使用场景：
-     * <ul>
-     *   <li>用户登出时删除当前设备的令牌</li>
-     *   <li>刷新令牌时删除旧的刷新令牌</li>
-     * </ul>
-     * 
-     * @param userId 用户ID
-     * @param jti 令牌ID
-     */
     @Override
     public void removeRefreshToken(Long userId, String jti) {
-        // 使用Lua脚本原子性地执行多个删除操作
-        DefaultRedisScript<Long> script = new DefaultRedisScript<>();
-        script.setScriptText(DEL_SCRIPT);
-        script.setResultType(Long.class);
-        
-        redisTemplate.execute(
-                script,
-                Arrays.asList(
-                        MAIN_HASH_KEY_PREFIX,
-                        userSetKey(userId),
-                        jtiExpireKey(jti)
-                ),
-                jti
+        requireArgs(userId, jti, Instant.now());
+
+        Long result = redisTemplate.execute(
+                REMOVE_SCRIPT,
+                Arrays.asList(jtiTokenKey(jti), userTokenZsetKey(userId), GLOBAL_EXPIRY_ZSET_KEY),
+                String.valueOf(userId),
+                jti,
+                globalMember(userId, jti)
         );
-        
-        log.debug("刷新令牌删除成功 - 用户ID: {}, 令牌ID: {}", userId, jti);
+
+        if (result != null && result == -1L) {
+            log.warn("Skip removing refresh token due to owner mismatch - userId: {}, jti: {}", userId, jti);
+        }
     }
 
-    /**
-     * 删除用户所有刷新令牌
-     * 
-     * <p>删除用户的所有刷新令牌，使用Redis管道原子性地执行多个操作：
-     * <ol>
-     *   <li>获取用户拥有的所有令牌ID</li>
-     *   <li>从Hash中删除所有令牌ID的映射</li>
-     *   <li>从String中删除所有过期标记</li>
-     *   <li>删除用户的令牌集合</li>
-     * </ol>
-     * 
-     * <p>使用场景：
-     * <ul>
-     *   <li>用户全设备登出</li>
-     *   <li>管理员封禁用户</li>
-     * </ul>
-     * 
-     * @param userId 用户ID
-     */
     @Override
     public void removeUserAllRefreshToken(Long userId) {
-        String userSetKey = userSetKey(userId);
-        Set<String> jtiSet = redisTemplate.opsForSet().members(userSetKey);
-        if (jtiSet == null || jtiSet.isEmpty()) {
-            log.debug("用户没有刷新令牌需要删除 - 用户ID: {}", userId);
+        if (userId == null) {
+            throw new IllegalArgumentException("userId cannot be null");
+        }
+
+        String userZsetKey = userTokenZsetKey(userId);
+        Set<String> allTokens = redisTemplate.opsForZSet().range(userZsetKey, 0, -1);
+        if (allTokens == null || allTokens.isEmpty()) {
+            redisTemplate.delete(userZsetKey);
             return;
         }
 
-        // 使用Redis管道原子性地执行多个删除操作
         redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
-            byte[] userSetKeyBytes = userSetKey.getBytes(StandardCharsets.UTF_8);
-            byte[] mainHashKeyBytes = MAIN_HASH_KEY_PREFIX.getBytes(StandardCharsets.UTF_8);
+            byte[] globalKeyBytes = GLOBAL_EXPIRY_ZSET_KEY.getBytes(StandardCharsets.UTF_8);
+            byte[] userKeyBytes = userZsetKey.getBytes(StandardCharsets.UTF_8);
 
-            // 1. 从Hash中删除所有令牌ID的映射
-            for (String jti : jtiSet) {
-                byte[] jtiBytes = jti.getBytes(StandardCharsets.UTF_8);
-                connection.hashCommands().hDel(mainHashKeyBytes, jtiBytes);
-                connection.keyCommands().del(jtiExpireKey(jti).getBytes(StandardCharsets.UTF_8));
+            for (String jti : allTokens) {
+                connection.keyCommands().del(jtiTokenKey(jti).getBytes(StandardCharsets.UTF_8));
+                connection.zSetCommands().zRem(globalKeyBytes, globalMember(userId, jti).getBytes(StandardCharsets.UTF_8));
             }
-            
-            // 2. 删除用户的令牌集合
-            connection.keyCommands().del(userSetKeyBytes);
-            
+            connection.keyCommands().del(userKeyBytes);
             return null;
         });
-        
-        log.info("用户所有刷新令牌删除成功 - 用户ID: {}, 令牌数量: {}", 
-                userId, jtiSet.size());
     }
 
-    /**
-     * 构建用户令牌集合的Redis键
-     * 
-     * @param userId 用户ID
-     * @return Redis键
-     */
-    private String userSetKey(long userId) {
-        return USER_SET_KEY_PREFIX + userId + ":tokens";
+    @Override
+    public Set<String> getUserValidTokens(Long userId) {
+        if (userId == null) {
+            throw new IllegalArgumentException("userId cannot be null");
+        }
+
+        String userZsetKey = userTokenZsetKey(userId);
+        long nowEpochSeconds = Instant.now().getEpochSecond();
+
+        Set<String> expiredJtis = redisTemplate.opsForZSet().rangeByScore(userZsetKey, 0, nowEpochSeconds);
+        if (expiredJtis != null && !expiredJtis.isEmpty()) {
+            redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+                byte[] userKeyBytes = userZsetKey.getBytes(StandardCharsets.UTF_8);
+                byte[] globalKeyBytes = GLOBAL_EXPIRY_ZSET_KEY.getBytes(StandardCharsets.UTF_8);
+
+                for (String jti : expiredJtis) {
+                    connection.zSetCommands().zRem(userKeyBytes, jti.getBytes(StandardCharsets.UTF_8));
+                    connection.zSetCommands().zRem(globalKeyBytes, globalMember(userId, jti).getBytes(StandardCharsets.UTF_8));
+                }
+                return null;
+            });
+        }
+
+        Set<String> valid = redisTemplate.opsForZSet().rangeByScore(userZsetKey, nowEpochSeconds + 1, Double.POSITIVE_INFINITY);
+        return valid == null ? new HashSet<>() : new HashSet<>(valid);
     }
 
-    /**
-     * 构建令牌过期标记的Redis键
-     * 
-     * @param jti 令牌ID
-     * @return Redis键
-     */
-    private String jtiExpireKey(String jti) {
+    @Override
+    public int cleanupExpiredTokens(int batchSize) {
+        int size = batchSize > 0 ? batchSize : DEFAULT_CLEANUP_BATCH_SIZE;
+        Long cleaned = redisTemplate.execute(
+                CLEANUP_BATCH_SCRIPT,
+                Arrays.asList(GLOBAL_EXPIRY_ZSET_KEY),
+                String.valueOf(Instant.now().getEpochSecond()),
+                String.valueOf(size),
+                TOKEN_KEY_PREFIX,
+                USER_SET_KEY_PREFIX,
+                USER_TOKEN_KEY_SUFFIX,
+                GLOBAL_MEMBER_SEPARATOR
+        );
+        return cleaned == null ? 0 : cleaned.intValue();
+    }
+
+    private static DefaultRedisScript<Long> longScript(String scriptText) {
+        DefaultRedisScript<Long> script = new DefaultRedisScript<>();
+        script.setScriptText(scriptText);
+        script.setResultType(Long.class);
+        return script;
+    }
+
+    private static void requireArgs(Long userId, String jti, Instant instant) {
+        if (userId == null || !StringUtils.hasText(jti) || instant == null) {
+            throw new IllegalArgumentException("userId/jti/expireAt cannot be null");
+        }
+    }
+
+    private String userTokenZsetKey(Long userId) {
+        return USER_SET_KEY_PREFIX + userId + USER_TOKEN_KEY_SUFFIX;
+    }
+
+    private String jtiTokenKey(String jti) {
         return TOKEN_KEY_PREFIX + jti;
+    }
+
+    private String globalMember(Long userId, String jti) {
+        return userId + GLOBAL_MEMBER_SEPARATOR + jti;
     }
 }

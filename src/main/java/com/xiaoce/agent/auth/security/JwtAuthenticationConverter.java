@@ -1,6 +1,8 @@
 package com.xiaoce.agent.auth.security;
 
 import com.xiaoce.agent.auth.domain.dto.JwtUserInfo;
+import com.xiaoce.agent.auth.domain.po.User;
+import com.xiaoce.agent.auth.mapper.UsersMapper;
 import com.xiaoce.agent.auth.service.impl.JwtTokenService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -11,7 +13,8 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import static com.xiaoce.agent.auth.common.constant.RefreshToken.USER_TOKEN_VERSION_KEY_PREFIX;
+import static com.xiaoce.agent.auth.common.constant.AuthRedisConstants.USER_IS_BANNED_BITMAP_KEY;
+import static com.xiaoce.agent.auth.common.constant.AuthRedisConstants.USER_TOKEN_VERSION_KEY_PREFIX;
 
 /**
  * JWT认证转换器
@@ -39,6 +42,7 @@ public class JwtAuthenticationConverter implements Converter<Jwt, JwtAuthenticat
 
     private final JwtTokenService jwtTokenService;
     private final RedisTemplate<String, String> redisTemplate;
+    private final UsersMapper usersMapper;
 
     /**
      * 转换JWT令牌为认证对象
@@ -72,7 +76,11 @@ public class JwtAuthenticationConverter implements Converter<Jwt, JwtAuthenticat
             // 3. 获取当前令牌版本并验证
             long currentVersion = getCurrentTokenVersion(userId);
             jwtTokenService.assertTokenVersion(jwt, currentVersion, JwtTokenService.TYPE_ACCESS);
-
+            // 增加一步去redis查询该用户是否被ban
+            Boolean banned = redisTemplate.opsForValue().getBit(USER_IS_BANNED_BITMAP_KEY, userId);
+            if (Boolean.TRUE.equals(banned)) {
+                throw new BadCredentialsException("User is banned");
+            }
             // 4. 提取用户昵称
             String nickname = jwt.getClaimAsString("nickName");
             

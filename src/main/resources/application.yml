@@ -14,6 +14,18 @@ spring:
     properties:
       hibernate:
         format_sql: true
+  datasource:
+    url: jdbc:mysql://${config.db.host}:${config.db.port}/${config.db.database}?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=UTC
+    username: ${config.db.username}
+    password: ${config.db.password}
+    # 也就是“翻译官”，让Java能跟MySQL说话
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  data:
+    redis:
+      host: ${config.redis.host}
+      port: ${config.redis.port}
+      password: ${config.redis.password}
 
 server:
   port: 8080
@@ -47,7 +59,7 @@ logging:
     # 简洁的控制台日志格式 - 只保留时间、级别和消息
     console: "%d{HH:mm:ss} %-5level - %msg%n"
     # 文件日志格式 - 稍微详细一些
-    file: "%d{yyyy-MM-dd HH:mm:ss} %-5level %logger{20} - %msg%n
+    file: "%d{yyyy-MM-dd HH:mm:ss} %-5level %logger{20} - %msg%n"
   file:
     name: logs/agent.log
   logback:

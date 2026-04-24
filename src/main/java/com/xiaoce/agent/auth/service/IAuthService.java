@@ -1,6 +1,7 @@
 package com.xiaoce.agent.auth.service;
 
 import com.xiaoce.agent.auth.domain.dto.LoginRequest;
+import com.xiaoce.agent.auth.domain.dto.PasswordResetRequest;
 import com.xiaoce.agent.auth.domain.dto.RefreshRequest;
 import com.xiaoce.agent.auth.domain.dto.RegisterRequest;
 import com.xiaoce.agent.auth.domain.vo.AuthResponse;
@@ -29,8 +30,9 @@ public interface IAuthService {
     UserInfoResponse me(Long userId);
 
     void logoutAll(String refreshToken);
-
+    // TODO 给管理端进行调用的
     void banUserPermanent(Long userId);
 
 
+    void resetPassword(@Valid PasswordResetRequest request);
 }

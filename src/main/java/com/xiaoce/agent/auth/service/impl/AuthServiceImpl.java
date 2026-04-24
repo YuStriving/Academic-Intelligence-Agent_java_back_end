@@ -5,17 +5,13 @@ import com.xiaoce.agent.auth.common.exception.BusinessException;
 import com.xiaoce.agent.auth.common.exception.ErrorCode;
 import com.xiaoce.agent.auth.common.utils.GenerateUserInfo;
 import com.xiaoce.agent.auth.config.AuthProperties;
-import com.xiaoce.agent.auth.domain.dto.JwtUserInfo;
-import com.xiaoce.agent.auth.domain.dto.LoginRequest;
-import com.xiaoce.agent.auth.domain.dto.RefreshRequest;
-import com.xiaoce.agent.auth.domain.dto.RegisterRequest;
+import com.xiaoce.agent.auth.domain.dto.*;
 import com.xiaoce.agent.auth.domain.po.User;
 import com.xiaoce.agent.auth.domain.vo.AuthResponse;
 import com.xiaoce.agent.auth.domain.vo.TokenPair;
 import com.xiaoce.agent.auth.domain.vo.TokenPairResponse;
 import com.xiaoce.agent.auth.domain.vo.UserInfoResponse;
 import com.xiaoce.agent.auth.enums.GenderEnum;
-import com.xiaoce.agent.auth.enums.UserStatus;
 import com.xiaoce.agent.auth.mapper.UsersMapper;
 import com.xiaoce.agent.auth.service.IAuthService;
 import com.xiaoce.agent.auth.service.IRefreshTokenStore;
@@ -32,19 +28,20 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
-import static com.xiaoce.agent.auth.common.constant.RefreshToken.USER_TOKEN_VERSION_KEY_PREFIX;
+import static com.xiaoce.agent.auth.common.constant.AuthRedisConstants.USER_IS_BANNED_BITMAP_KEY;
+import static com.xiaoce.agent.auth.common.constant.AuthRedisConstants.USER_TOKEN_VERSION_KEY_PREFIX;
 
 /**
- * 认证服务实现类
+ * 璁よ瘉鏈嶅姟瀹炵幇绫?
  * 
- * <p>提供用户认证相关的核心业务逻辑，包括用户注册、登录、登出、获取用户信息和刷新令牌等功能。
- * 该类处理用户数据的持久化、密码加密、JWT令牌管理、Redis刷新令牌存储等核心功能。
+ * <p>鎻愪緵鐢ㄦ埛璁よ瘉鐩稿叧鐨勬牳蹇冧笟鍔￠€昏緫锛屽寘鎷敤鎴锋敞鍐屻€佺櫥褰曘€佺櫥鍑恒€佽幏鍙栫敤鎴蜂俊鎭拰鍒锋柊浠ょ墝绛夊姛鑳姐€?
+ * 璇ョ被澶勭悊鐢ㄦ埛鏁版嵁鐨勬寔涔呭寲銆佸瘑鐮佸姞瀵嗐€丣WT浠ょ墝绠＄悊銆丷edis鍒锋柊浠ょ墝瀛樺偍绛夋牳蹇冨姛鑳姐€?
  * 
- * <p>使用场景：
+ * <p>浣跨敤鍦烘櫙锛?
  * <ul>
- *   <li>处理用户注册业务，验证用户名和邮箱唯一性</li>
- *   <li>验证用户登录凭据，生成JWT令牌</li>
- *   <li>管理用户会话，刷新和失效令牌</li>
+ *   <li>澶勭悊鐢ㄦ埛娉ㄥ唽涓氬姟锛岄獙璇佺敤鎴峰悕鍜岄偖绠卞敮涓€鎬?/li>
+ *   <li>楠岃瘉鐢ㄦ埛鐧诲綍鍑嵁锛岀敓鎴怞WT浠ょ墝</li>
+ *   <li>绠＄悊鐢ㄦ埛浼氳瘽锛屽埛鏂板拰澶辨晥浠ょ墝</li>
  * </ul>
  */
 @Slf4j
@@ -53,8 +50,8 @@ import static com.xiaoce.agent.auth.common.constant.RefreshToken.USER_TOKEN_VERS
 public class AuthServiceImpl implements IAuthService {
 
     /**
-     * 邮箱格式正则表达式
-     * 用于验证用户输入的邮箱是否符合标准格式
+     * 閭鏍煎紡姝ｅ垯琛ㄨ揪寮?
+     * 鐢ㄤ簬楠岃瘉鐢ㄦ埛杈撳叆鐨勯偖绠辨槸鍚︾鍚堟爣鍑嗘牸寮?
      */
     private static final Pattern EMAIL_PATTERN = Pattern.compile("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
 
@@ -66,38 +63,38 @@ public class AuthServiceImpl implements IAuthService {
     private final RedisTemplate<String, String> redisTemplate;
 
     /**
-     * 用户注册服务
+     * 鐢ㄦ埛娉ㄥ唽鏈嶅姟
      * 
-     * <p>创建新用户账户，包括验证用户输入、检查用户名和邮箱唯一性、生成用户信息、
-     * 加密密码、保存到数据库，并生成JWT令牌对。
+     * <p>鍒涘缓鏂扮敤鎴疯处鎴凤紝鍖呮嫭楠岃瘉鐢ㄦ埛杈撳叆銆佹鏌ョ敤鎴峰悕鍜岄偖绠卞敮涓€鎬с€佺敓鎴愮敤鎴蜂俊鎭€?
+     * 鍔犲瘑瀵嗙爜銆佷繚瀛樺埌鏁版嵁搴擄紝骞剁敓鎴怞WT浠ょ墝瀵广€?
      * 
-     * <p>使用场景：
+     * <p>浣跨敤鍦烘櫙锛?
      * <ul>
-     *   <li>用户通过注册页面创建新账户</li>
-     *   <li>系统管理员创建测试账户</li>
+     *   <li>鐢ㄦ埛閫氳繃娉ㄥ唽椤甸潰鍒涘缓鏂拌处鎴?/li>
+     *   <li>绯荤粺绠＄悊鍛樺垱寤烘祴璇曡处鎴?/li>
      * </ul>
      * 
-     * @param req 注册请求，包含用户名、邮箱、密码和同意条款
-     * @return 包含用户信息和JWT令牌对的响应
+     * @param req 娉ㄥ唽璇锋眰锛屽寘鍚敤鎴峰悕銆侀偖绠便€佸瘑鐮佸拰鍚屾剰鏉℃
+     * @return 鍖呭惈鐢ㄦ埛淇℃伅鍜孞WT浠ょ墝瀵圭殑鍝嶅簲
      */
     @Transactional
     @Override
     public AuthResponse register(RegisterRequest req) {
-        // 检查用户是否同意服务条款
+        // 妫€鏌ョ敤鎴锋槸鍚﹀悓鎰忔湇鍔℃潯娆?
         if (!req.agreeTerms()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "You must agree to the terms and conditions");
         }
 
-        // 规范化用户名和邮箱格式
+        // 瑙勮寖鍖栫敤鎴峰悕鍜岄偖绠辨牸寮?
         String username = normalizeUsername(req.username());
         String email = normalizeEmail(req.email());
 
-        // 验证输入格式
+        // 楠岃瘉杈撳叆鏍煎紡
         validateUsername(username);
         validateEmail(email);
         validatePassword(req.password());
 
-        // 检查用户名和邮箱是否已存在
+        // 妫€鏌ョ敤鎴峰悕鍜岄偖绠辨槸鍚﹀凡瀛樺湪
         if (usersMapper.existsByUsername(username)) {
             throw new BusinessException(ErrorCode.USERNAME_EXISTS);
         }
@@ -105,23 +102,22 @@ public class AuthServiceImpl implements IAuthService {
             throw new BusinessException(ErrorCode.EMAIL_EXISTS);
         }
 
-        // 构建用户对象并自动生成用户信息
+        // 鏋勫缓鐢ㄦ埛瀵硅薄骞惰嚜鍔ㄧ敓鎴愮敤鎴蜂俊鎭?
         User user = User.builder()
                 .academicId(GenerateUserInfo.getAcademicId())
                 .username(username)
                 .email(email)
                 .passwordHash(passwordEncoder.encode(req.password()))
                 .gender(GenderEnum.UNKNOWN.getCode())
-                .status(UserStatus.ENABLE.getCode())
                 .avatarUrl(GenerateUserInfo.getAvatarUrl())
                 .bio(GenerateUserInfo.getBio())
                 .nickname(GenerateUserInfo.generateUserNickName())
                 .school(GenerateUserInfo.getSchool())
                 .build();
         usersMapper.insert(user);
-        log.debug("用户创建成功 - 用户ID: {}, 用户名: {}", user.getId(), username);
+        log.debug("鐢ㄦ埛鍒涘缓鎴愬姛 - 鐢ㄦ埛ID: {}, 鐢ㄦ埛鍚? {}", user.getId(), username);
 
-        // 生成JWT令牌对并保存刷新令牌到Redis
+        // 鐢熸垚JWT浠ょ墝瀵瑰苟淇濆瓨鍒锋柊浠ょ墝鍒癛edis
         long tokenVersion = getCurrentTokenVersion(user.getId());
         TokenPair tokenPair = jwtTokenService.issueTokenPair(user, tokenVersion);
         refreshTokenRedisStore.saveRefreshToken(user.getId(), tokenPair.refreshTokenId(), tokenPair.refreshTokenExpiresAt());
@@ -133,30 +129,30 @@ public class AuthServiceImpl implements IAuthService {
     }
 
     /**
-     * 用户登录服务
+     * 鐢ㄦ埛鐧诲綍鏈嶅姟
      * 
-     * <p>验证用户身份（支持邮箱或用户名登录），检查用户状态，生成JWT令牌对。
-     * 如果用户状态被禁用，则拒绝登录。
+     * <p>楠岃瘉鐢ㄦ埛韬唤锛堟敮鎸侀偖绠辨垨鐢ㄦ埛鍚嶇櫥褰曪級锛屾鏌ョ敤鎴风姸鎬侊紝鐢熸垚JWT浠ょ墝瀵广€?
+     * 濡傛灉鐢ㄦ埛鐘舵€佽绂佺敤锛屽垯鎷掔粷鐧诲綍銆?
      * 
-     * <p>使用场景：
+     * <p>浣跨敤鍦烘櫙锛?
      * <ul>
-     *   <li>用户通过邮箱和密码登录</li>
-     *   <li>用户通过用户名和密码登录</li>
+     *   <li>鐢ㄦ埛閫氳繃閭鍜屽瘑鐮佺櫥褰?/li>
+     *   <li>鐢ㄦ埛閫氳繃鐢ㄦ埛鍚嶅拰瀵嗙爜鐧诲綍</li>
      * </ul>
      * 
-     * @param req 登录请求，包含邮箱/用户名和密码
-     * @return 包含用户信息和JWT令牌对的响应
+     * @param req 鐧诲綍璇锋眰锛屽寘鍚偖绠?鐢ㄦ埛鍚嶅拰瀵嗙爜
+     * @return 鍖呭惈鐢ㄦ埛淇℃伅鍜孞WT浠ょ墝瀵圭殑鍝嶅簲
      */
     @Transactional(readOnly = true)
     @Override
     public AuthResponse login(LoginRequest req) {
-        // 获取并规范化用户身份标识
+        // 鑾峰彇骞惰鑼冨寲鐢ㄦ埛韬唤鏍囪瘑
         String identity = req.emailOrUsername() == null ? "" : req.emailOrUsername().trim();
         if (!StringUtils.hasText(identity)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Username or email is required");
         }
 
-        // 根据身份标识格式判断是邮箱还是用户名，并查询用户
+        // 鏍规嵁韬唤鏍囪瘑鏍煎紡鍒ゆ柇鏄偖绠辫繕鏄敤鎴峰悕锛屽苟鏌ヨ鐢ㄦ埛
         User user;
         if (EMAIL_PATTERN.matcher(identity).matches()) {
             user = usersMapper.findByEmail(normalizeEmail(identity));
@@ -164,22 +160,21 @@ public class AuthServiceImpl implements IAuthService {
             user = usersMapper.findByUsername(normalizeUsername(identity));
         }
         
-        // 验证用户是否存在
+        // 楠岃瘉鐢ㄦ埛鏄惁瀛樺湪
         if (user == null) {
             throw new BusinessException(ErrorCode.INVALID_CREDENTIALS);
         }
         
-        // 验证密码是否正确
+        // 楠岃瘉瀵嗙爜鏄惁姝ｇ‘
         if (!StringUtils.hasText(req.password()) || !passwordEncoder.matches(req.password(), user.getPasswordHash())) {
             throw new BusinessException(ErrorCode.INVALID_CREDENTIALS);
         }
-        
-        // 检查用户状态是否被禁用
-        if (user.getStatus() != null && user.getStatus() == UserStatus.DISABLE.getCode()) {
-            throw new BusinessException(ErrorCode.FORBIDDEN, "User is disabled");
+        if (isUserBannedByBitmap(user.getId())) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "User has been banned");
         }
 
-        // 生成JWT令牌对并保存刷新令牌到Redis
+
+        // 鐢熸垚JWT浠ょ墝瀵瑰苟淇濆瓨鍒锋柊浠ょ墝鍒癛edis
         long tokenVersion = getCurrentTokenVersion(user.getId());
         TokenPair tokenPair = jwtTokenService.issueTokenPair(user, tokenVersion);
         refreshTokenRedisStore.saveRefreshToken(user.getId(), tokenPair.refreshTokenId(), tokenPair.refreshTokenExpiresAt());
@@ -191,46 +186,47 @@ public class AuthServiceImpl implements IAuthService {
     }
 
     /**
-     * 刷新访问令牌服务
+     * 鍒锋柊璁块棶浠ょ墝鏈嶅姟
      * 
-     * <p>使用有效的刷新令牌获取新的访问令牌和刷新令牌。原刷新令牌会被失效，
-     * 同时验证令牌版本，确保没有被全设备登出。
+     * <p>浣跨敤鏈夋晥鐨勫埛鏂颁护鐗岃幏鍙栨柊鐨勮闂护鐗屽拰鍒锋柊浠ょ墝銆傚師鍒锋柊浠ょ墝浼氳澶辨晥锛?
+     * 鍚屾椂楠岃瘉浠ょ墝鐗堟湰锛岀‘淇濇病鏈夎鍏ㄨ澶囩櫥鍑恒€?
      * 
-     * <p>使用场景：
+     * <p>浣跨敤鍦烘櫙锛?
      * <ul>
-     *   <li>访问令牌即将过期，前端自动刷新</li>
-     *   <li>用户重新打开应用需要续期</li>
+     *   <li>璁块棶浠ょ墝鍗冲皢杩囨湡锛屽墠绔嚜鍔ㄥ埛鏂?/li>
+     *   <li>鐢ㄦ埛閲嶆柊鎵撳紑搴旂敤闇€瑕佺画鏈?/li>
      * </ul>
      * 
-     * @param req 刷新令牌请求，包含刷新令牌
-     * @return 新的JWT令牌对响应
+     * @param req 鍒锋柊浠ょ墝璇锋眰锛屽寘鍚埛鏂颁护鐗?
+     * @return 鏂扮殑JWT浠ょ墝瀵瑰搷搴?
      */
     @Transactional
     @Override
     public TokenPairResponse refreshToken(RefreshRequest req) {
-        // 解析并验证刷新令牌
+        // 瑙ｆ瀽骞堕獙璇佸埛鏂颁护鐗?
         Jwt jwt = jwtTokenService.parseAndVerify(req.refreshToken(), JwtTokenService.TYPE_REFRESH);
         long userId = jwtTokenService.parseSubjectAsUserId(jwt.getSubject());
         String jti = jwtTokenService.extractJwtId(jwt);
 
-        // 验证刷新令牌是否在Redis中存在且有效
+        // 楠岃瘉鍒锋柊浠ょ墝鏄惁鍦≧edis涓瓨鍦ㄤ笖鏈夋晥
         boolean validInStore = refreshTokenRedisStore.validateRefreshToken(userId, jti);
         if (!validInStore) {
             throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN);
         }
 
-        // 验证令牌版本，防止被全设备登出的令牌继续使用
+        // 楠岃瘉浠ょ墝鐗堟湰锛岄槻姝㈣鍏ㄨ澶囩櫥鍑虹殑浠ょ墝缁х画浣跨敤
         long currentVersion = getCurrentTokenVersion(userId);
         jwtTokenService.assertTokenVersion(jwt, currentVersion, JwtTokenService.TYPE_REFRESH);
 
-        // 查询用户并检查状态
+        // 鏌ヨ鐢ㄦ埛骞舵鏌ョ姸鎬?
         User user = Optional.ofNullable(usersMapper.selectById(userId))
                 .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN));
-        if (user.getStatus() != null && user.getStatus() == UserStatus.DISABLE.getCode()) {
-            throw new BusinessException(ErrorCode.FORBIDDEN, "User is disabled");
+        if (isUserBannedByBitmap(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "User has been banned");
         }
 
-        // 使旧刷新令牌失效并生成新的令牌对
+
+        // 浣挎棫鍒锋柊浠ょ墝澶辨晥骞剁敓鎴愭柊鐨勪护鐗屽
         refreshTokenRedisStore.removeRefreshToken(userId, jti);
         TokenPair tokenPair = jwtTokenService.issueTokenPair(user, currentVersion);
         refreshTokenRedisStore.saveRefreshToken(userId, tokenPair.refreshTokenId(), tokenPair.refreshTokenExpiresAt());
@@ -239,18 +235,18 @@ public class AuthServiceImpl implements IAuthService {
     }
 
     /**
-     * 获取用户信息服务
+     * 鑾峰彇鐢ㄦ埛淇℃伅鏈嶅姟
      * 
-     * <p>根据用户ID查询数据库中的用户信息并返回。
+     * <p>鏍规嵁鐢ㄦ埛ID鏌ヨ鏁版嵁搴撲腑鐨勭敤鎴蜂俊鎭苟杩斿洖銆?
      * 
-     * <p>使用场景：
+     * <p>浣跨敤鍦烘櫙锛?
      * <ul>
-     *   <li>用户登录后获取个人信息</li>
-     *   <li>编辑个人资料前先获取当前信息</li>
+     *   <li>鐢ㄦ埛鐧诲綍鍚庤幏鍙栦釜浜轰俊鎭?/li>
+     *   <li>缂栬緫涓汉璧勬枡鍓嶅厛鑾峰彇褰撳墠淇℃伅</li>
      * </ul>
      * 
-     * @param userId 用户ID
-     * @return 用户详细信息响应
+     * @param userId 鐢ㄦ埛ID
+     * @return 鐢ㄦ埛璇︾粏淇℃伅鍝嶅簲
      */
     @Transactional(readOnly = true)
     @Override
@@ -261,141 +257,190 @@ public class AuthServiceImpl implements IAuthService {
     }
 
     /**
-     * 用户登出服务
+     * 鐢ㄦ埛鐧诲嚭鏈嶅姟
      * 
-     * <p>使传入的刷新令牌失效，用户需要重新登录才能获取新的令牌。
-     * 只影响当前设备的令牌，不影响其他设备。
+     * <p>浣夸紶鍏ョ殑鍒锋柊浠ょ墝澶辨晥锛岀敤鎴烽渶瑕侀噸鏂扮櫥褰曟墠鑳借幏鍙栨柊鐨勪护鐗屻€?
+     * 鍙奖鍝嶅綋鍓嶈澶囩殑浠ょ墝锛屼笉褰卞搷鍏朵粬璁惧銆?
      * 
-     * <p>使用场景：
+     * <p>浣跨敤鍦烘櫙锛?
      * <ul>
-     *   <li>用户主动退出登录</li>
-     *   <li>切换账户前先登出</li>
+     *   <li>鐢ㄦ埛涓诲姩閫€鍑虹櫥褰?/li>
+     *   <li>鍒囨崲璐︽埛鍓嶅厛鐧诲嚭</li>
      * </ul>
      * 
-     * @param refreshToken 刷新令牌
+     * @param refreshToken 鍒锋柊浠ょ墝
      */
     @Transactional
     @Override
     public void logout(String refreshToken) {
-        // 解析并验证刷新令牌
+        // 瑙ｆ瀽骞堕獙璇佸埛鏂颁护鐗?
         Jwt jwt = jwtTokenService.parseAndVerify(refreshToken, JwtTokenService.TYPE_REFRESH);
         JwtUserInfo jwtUserInfo = jwtTokenService.extractUserInfo(jwt);
         Long userId = jwtUserInfo.userId();
         String jti = jwtTokenService.extractJwtId(jwt);
 
-        // 验证刷新令牌有效性
+        // 楠岃瘉鍒锋柊浠ょ墝鏈夋晥鎬?
         boolean isValid = refreshTokenRedisStore.validateRefreshToken(userId, jti);
         if (!isValid) {
             throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN);
         }
 
-        // 验证令牌版本并使刷新令牌失效
+        // 楠岃瘉浠ょ墝鐗堟湰骞朵娇鍒锋柊浠ょ墝澶辨晥
         long currentVersion = getCurrentTokenVersion(userId);
         jwtTokenService.assertTokenVersion(jwt, currentVersion, JwtTokenService.TYPE_REFRESH);
         refreshTokenRedisStore.removeRefreshToken(userId, jti);
-        log.debug("用户登出成功 - 用户ID: {}, 令牌ID: {}", userId, jti);
+        log.debug("鐢ㄦ埛鐧诲嚭鎴愬姛 - 鐢ㄦ埛ID: {}, 浠ょ墝ID: {}", userId, jti);
     }
 
     /**
-     * 用户全设备登出服务
+     * 鐢ㄦ埛鍏ㄨ澶囩櫥鍑烘湇鍔?
      * 
-     * <p>使该用户所有设备的刷新令牌失效，增加令牌版本号，所有旧令牌都将失效。
-     * 用户需要在所有设备上重新登录。
+     * <p>浣胯鐢ㄦ埛鎵€鏈夎澶囩殑鍒锋柊浠ょ墝澶辨晥锛屽鍔犱护鐗岀増鏈彿锛屾墍鏈夋棫浠ょ墝閮藉皢澶辨晥銆?
+     * 鐢ㄦ埛闇€瑕佸湪鎵€鏈夎澶囦笂閲嶆柊鐧诲綍銆?
      * 
-     * <p>使用场景：
+     * <p>浣跨敤鍦烘櫙锛?
      * <ul>
-     *   <li>怀疑账户被盗用，强制所有设备重新登录</li>
-     *   <li>修改密码后，希望旧令牌全部失效</li>
+     *   <li>鎬€鐤戣处鎴疯鐩楃敤锛屽己鍒舵墍鏈夎澶囬噸鏂扮櫥褰?/li>
+     *   <li>淇敼瀵嗙爜鍚庯紝甯屾湜鏃т护鐗屽叏閮ㄥけ鏁?/li>
      * </ul>
      * 
-     * @param refreshToken 刷新令牌
+     * @param refreshToken 鍒锋柊浠ょ墝
      */
     @Transactional
     @Override
     public void logoutAll(String refreshToken) {
-        // 解析并验证刷新令牌
+        // 瑙ｆ瀽骞堕獙璇佸埛鏂颁护鐗?
         Jwt jwt = jwtTokenService.parseAndVerify(refreshToken, JwtTokenService.TYPE_REFRESH);
         Long userId = jwtTokenService.parseSubjectAsUserId(jwt.getSubject());
         String jti = jwtTokenService.extractJwtId(jwt);
 
-        // 验证刷新令牌有效性
+        // 楠岃瘉鍒锋柊浠ょ墝鏈夋晥鎬?
         boolean isValid = refreshTokenRedisStore.validateRefreshToken(userId, jti);
         if (!isValid) {
             throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN);
         }
 
-        // 验证令牌版本，失效该用户所有刷新令牌，并增加令牌版本号
+        // 楠岃瘉浠ょ墝鐗堟湰锛屽け鏁堣鐢ㄦ埛鎵€鏈夊埛鏂颁护鐗岋紝骞跺鍔犱护鐗岀増鏈彿
         long currentVersion = getCurrentTokenVersion(userId);
         jwtTokenService.assertTokenVersion(jwt, currentVersion, JwtTokenService.TYPE_REFRESH);
 
-        refreshTokenRedisStore.removeUserAllRefreshToken(userId);
         bumpTokenVersion(userId);
-        log.info("用户全设备登出成功 - 用户ID: {}, 新版本号: {}", userId, currentVersion + 1);
+        refreshTokenRedisStore.removeUserAllRefreshToken(userId);
+        log.info("鐢ㄦ埛鍏ㄨ澶囩櫥鍑烘垚鍔?- 鐢ㄦ埛ID: {}, 鏂扮増鏈彿: {}", userId, currentVersion + 1);
     }
 
     /**
-     * 永久封禁用户
+     * 姘镐箙灏佺鐢ㄦ埛
      * 
-     * <p>将用户状态设置为禁用，该用户将无法登录系统。
+     * <p>灏嗙敤鎴风姸鎬佽缃负绂佺敤锛岃鐢ㄦ埛灏嗘棤娉曠櫥褰曠郴缁熴€?
      * 
-     * <p>使用场景：
+     * <p>浣跨敤鍦烘櫙锛?
      * <ul>
-     *   <li>管理员封禁违规用户</li>
-     *   <li>系统自动封禁异常行为用户</li>
+     *   <li>绠＄悊鍛樺皝绂佽繚瑙勭敤鎴?/li>
+     *   <li>绯荤粺鑷姩灏佺寮傚父琛屼负鐢ㄦ埛</li>
      * </ul>
      * 
-     * @param userId 用户ID
+     * @param userId 鐢ㄦ埛ID
      */
     @Override
     @Transactional
     public void banUserPermanent(Long userId) {
-        if (userId == null){
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "User id is required");
+        if (userId == null || userId < 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "userId is required");
         }
-        
-        // 更新用户状态为禁用
-        UpdateWrapper<User> wrapper = new UpdateWrapper<>();
-        wrapper.eq("id", userId);
-        wrapper.set("status", UserStatus.DISABLE.getCode());
-        int update = usersMapper.update(wrapper);
-        if (update == 0){
+        User user = usersMapper.selectById(userId);
+        if (user == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "User not found");
         }
-        
-        log.warn("用户被永久封禁 - 用户ID: {}", userId);
-        //TODO 将用户禁用之后，需要让用户进行退出登录操作，后续实现
+        markUserBannedInBitmap(userId);
+        bumpTokenVersion(userId);
+        refreshTokenRedisStore.removeUserAllRefreshToken(userId);
+        log.info("鐢ㄦ埛姘镐箙灏佺鎴愬姛 - 鐢ㄦ埛ID: {}", userId);
+    }
+
+    @Override
+    @Transactional
+    public void resetPassword(PasswordResetRequest request) {
+        // 鑾峰彇骞惰鑼冨寲鐢ㄦ埛韬唤鏍囪瘑
+        String identity = request.emailOrUsername() == null ? "" : request.emailOrUsername().trim();
+        if (!StringUtils.hasText(identity)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Username or email is required");
+        }
+
+        // 楠岃瘉鐮佸熀纭€鏍煎紡鏍￠獙锛堥暱搴︾敱閰嶇疆椹卞姩锛?
+        String code = request.code() == null ? "" : request.code().trim();
+        int codeLength = authProperties.getVerification().getCodeLength();
+        if (!StringUtils.hasText(code) || code.length() != codeLength || !code.chars().allMatch(Character::isDigit)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Invalid verification code");
+        }
+
+        // 閫氳繃閭鎴栫敤鎴峰悕鏌ユ壘鐢ㄦ埛
+        User user;
+        if (EMAIL_PATTERN.matcher(identity).matches()) {
+            user = usersMapper.findByEmail(normalizeEmail(identity));
+        } else {
+            user = usersMapper.findByUsername(normalizeUsername(identity));
+        }
+
+        // 鏍￠獙鐢ㄦ埛鐘舵€佸拰鏃у瘑鐮?
+        if (user == null) {
+            throw new BusinessException(ErrorCode.INVALID_CREDENTIALS);
+        }
+        if (!StringUtils.hasText(request.password()) || !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+            throw new BusinessException(ErrorCode.INVALID_CREDENTIALS);
+        }
+
+        // 鏍￠獙鏂板瘑鐮佸己搴︼紝骞堕槻姝笌鏃у瘑鐮佷竴鑷?
+        validatePassword(request.newPassword());
+        if (passwordEncoder.matches(request.newPassword(), user.getPasswordHash())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "New password cannot be the same as old password");
+        }
+
+        // 鏇存柊瀵嗙爜
+        UpdateWrapper<User> wrapper = new UpdateWrapper<>();
+        wrapper.eq("id", user.getId());
+        wrapper.set("password_hash", passwordEncoder.encode(request.newPassword()));
+        int update = usersMapper.update(wrapper);
+        if (update == 0) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "User not found");
+        }
+
+        // 淇敼瀵嗙爜鍚庤鎵€鏈夎澶囬噸鏂扮櫥褰?
+        bumpTokenVersion(user.getId());
+        refreshTokenRedisStore.removeUserAllRefreshToken(user.getId());
+        log.info("鐢ㄦ埛閲嶇疆瀵嗙爜鎴愬姛 - 鐢ㄦ埛ID: {}", user.getId());
     }
 
     /**
-     * 规范化邮箱格式
+     * 瑙勮寖鍖栭偖绠辨牸寮?
      * 
-     * <p>去除首尾空格并转换为小写，保证邮箱存储和查询的一致性。
+     * <p>鍘婚櫎棣栧熬绌烘牸骞惰浆鎹负灏忓啓锛屼繚璇侀偖绠卞瓨鍌ㄥ拰鏌ヨ鐨勪竴鑷存€с€?
      * 
-     * @param email 原始邮箱
-     * @return 规范化后的邮箱
+     * @param email 鍘熷閭
+     * @return 瑙勮寖鍖栧悗鐨勯偖绠?
      */
     private String normalizeEmail(String email) {
         return email == null ? null : email.trim().toLowerCase(Locale.ROOT);
     }
 
     /**
-     * 规范化用户名格式
+     * 瑙勮寖鍖栫敤鎴峰悕鏍煎紡
      * 
-     * <p>去除首尾空格，保持用户名大小写原样。
+     * <p>鍘婚櫎棣栧熬绌烘牸锛屼繚鎸佺敤鎴峰悕澶у皬鍐欏師鏍枫€?
      * 
-     * @param username 原始用户名
-     * @return 规范化后的用户名
+     * @param username 鍘熷鐢ㄦ埛鍚?
+     * @return 瑙勮寖鍖栧悗鐨勭敤鎴峰悕
      */
     private String normalizeUsername(String username) {
         return username == null ? null : username.trim();
     }
 
     /**
-     * 验证邮箱格式
+     * 楠岃瘉閭鏍煎紡
      * 
-     * <p>检查邮箱是否为空、是否符合标准格式、长度是否合理。
+     * <p>妫€鏌ラ偖绠辨槸鍚︿负绌恒€佹槸鍚︾鍚堟爣鍑嗘牸寮忋€侀暱搴︽槸鍚﹀悎鐞嗐€?
      * 
-     * @param email 邮箱地址
+     * @param email 閭鍦板潃
      */
     private void validateEmail(String email) {
         if (!StringUtils.hasText(email)) {
@@ -410,11 +455,11 @@ public class AuthServiceImpl implements IAuthService {
     }
 
     /**
-     * 验证用户名格式
+     * 楠岃瘉鐢ㄦ埛鍚嶆牸寮?
      * 
-     * <p>检查用户名是否为空、长度是否在3-20之间、是否只包含字母数字下划线、是否以字母开头。
+     * <p>妫€鏌ョ敤鎴峰悕鏄惁涓虹┖銆侀暱搴︽槸鍚﹀湪3-20涔嬮棿銆佹槸鍚﹀彧鍖呭惈瀛楁瘝鏁板瓧涓嬪垝绾裤€佹槸鍚︿互瀛楁瘝寮€澶淬€?
      * 
-     * @param username 用户名
+     * @param username 鐢ㄦ埛鍚?
      */
     private void validateUsername(String username) {
         if (!StringUtils.hasText(username)) {
@@ -432,11 +477,11 @@ public class AuthServiceImpl implements IAuthService {
     }
 
     /**
-     * 验证密码格式
+     * 楠岃瘉瀵嗙爜鏍煎紡
      * 
-     * <p>检查密码是否为空、长度是否符合配置要求、是否同时包含字母和数字。
+     * <p>妫€鏌ュ瘑鐮佹槸鍚︿负绌恒€侀暱搴︽槸鍚︾鍚堥厤缃姹傘€佹槸鍚﹀悓鏃跺寘鍚瓧姣嶅拰鏁板瓧銆?
      * 
-     * @param password 密码
+     * @param password 瀵嗙爜
      */
     private void validatePassword(String password) {
         if (!StringUtils.hasText(password)) {
@@ -458,13 +503,13 @@ public class AuthServiceImpl implements IAuthService {
     }
 
     /**
-     * 获取用户当前令牌版本号
+     * 鑾峰彇鐢ㄦ埛褰撳墠浠ょ墝鐗堟湰鍙?
      * 
-     * <p>从Redis中查询用户的令牌版本号，如果不存在则返回0。
-     * 令牌版本号用于实现全设备登出功能。
+     * <p>浠嶳edis涓煡璇㈢敤鎴风殑浠ょ墝鐗堟湰鍙凤紝濡傛灉涓嶅瓨鍦ㄥ垯杩斿洖0銆?
+     * 浠ょ墝鐗堟湰鍙风敤浜庡疄鐜板叏璁惧鐧诲嚭鍔熻兘銆?
      * 
-     * @param userId 用户ID
-     * @return 当前令牌版本号
+     * @param userId 鐢ㄦ埛ID
+     * @return 褰撳墠浠ょ墝鐗堟湰鍙?
      */
     private long getCurrentTokenVersion(Long userId) {
         String raw = redisTemplate.opsForValue().get(USER_TOKEN_VERSION_KEY_PREFIX + userId);
@@ -479,14 +524,36 @@ public class AuthServiceImpl implements IAuthService {
     }
 
     /**
-     * 增加用户令牌版本号
+     * 澧炲姞鐢ㄦ埛浠ょ墝鐗堟湰鍙?
      * 
-     * <p>在Redis中递增用户的令牌版本号，这样所有旧令牌都会失效，
-     * 用户需要重新登录才能获取新的令牌。
+     * <p>鍦≧edis涓€掑鐢ㄦ埛鐨勪护鐗岀増鏈彿锛岃繖鏍锋墍鏈夋棫浠ょ墝閮戒細澶辨晥锛?
+     * 鐢ㄦ埛闇€瑕侀噸鏂扮櫥褰曟墠鑳借幏鍙栨柊鐨勪护鐗屻€?
      * 
-     * @param userId 用户ID
+     * @param userId 鐢ㄦ埛ID
      */
     private void bumpTokenVersion(Long userId) {
         redisTemplate.opsForValue().increment(USER_TOKEN_VERSION_KEY_PREFIX + userId);
     }
+
+    /**
+     * 灏嗙敤鎴锋按涔呭皝绂佺姸鎬佸啓鍏itmap锛屼究浜庨珮鏁堟煡璇?
+     *
+     * @param userId 鐢ㄦ埛ID
+     */
+    private void markUserBannedInBitmap(Long userId) {
+        redisTemplate.opsForValue().setBit(USER_IS_BANNED_BITMAP_KEY, userId, true);
+    }
+
+    /**
+     * 鍒ゆ柇鐢ㄦ埛鏄惁鍦ㄥ皝绂佷綅鍥句腑琚爣璁颁负绂佺敤
+     *
+     * @param userId 鐢ㄦ埛ID
+     * @return true 琛ㄧず宸插皝绂?
+     */
+    private boolean isUserBannedByBitmap(Long userId) {
+        Boolean banned = redisTemplate.opsForValue().getBit(USER_IS_BANNED_BITMAP_KEY, userId);
+        return Boolean.TRUE.equals(banned);
+    }
 }
+
+

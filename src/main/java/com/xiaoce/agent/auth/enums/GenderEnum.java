@@ -7,9 +7,9 @@ import lombok.Getter;
 @Getter
 @AllArgsConstructor
 public enum GenderEnum {
-    MALE(0, "男"),
-    FEMALE(1, "女"),
-    UNKNOWN(2, "未知");
+    MALE(0, "未知"),
+    FEMALE(1, "男"),
+    UNKNOWN(2, "女");
 
     private final Integer code;
     private final String desc;

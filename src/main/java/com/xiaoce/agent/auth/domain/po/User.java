@@ -80,10 +80,6 @@ public class User implements Serializable {
      */
     private String bio;
 
-    /**
-     * 状态: 0-禁用, 1-启用
-     */
-    private Integer status;
 
     /**
      * 创建时间
