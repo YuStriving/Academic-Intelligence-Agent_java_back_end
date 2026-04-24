@@ -14,11 +14,6 @@ public final class RefreshToken {
     // main hash table for all refresh tokens
     public static final String MAIN_HASH_KEY_PREFIX = "auth:refresh:tokens:hash";
 
-    // optional block key (legacy compatibility)
-    public static final String USER_BLOCK_KEY_PREFIX = "auth:user:block:";
-
-    public static final String BAN_USER_PERMANENT_KEY_PREFIX = "auth:ban:user:";
-
     // token version key by userId, used for immediate invalidation after kick-offline
     public static final String USER_TOKEN_VERSION_KEY_PREFIX = "auth:user:token:version:";
 }

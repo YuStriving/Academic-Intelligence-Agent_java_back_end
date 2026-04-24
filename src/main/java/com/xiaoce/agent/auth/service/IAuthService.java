@@ -29,7 +29,7 @@ public interface IAuthService {
     UserInfoResponse me(Long userId);
 
     void logoutAll(String refreshToken);
-    // TODO 永久封禁用户
+
     void banUserPermanent(Long userId);
 
 
