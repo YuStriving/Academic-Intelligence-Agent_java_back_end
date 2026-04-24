@@ -1,6 +1,8 @@
 spring:
   application:
     name: agent
+  profiles:
+    active: dev
   datasource:
     url: jdbc:mysql://127.0.0.1:3306/agent_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: root
@@ -41,22 +43,24 @@ server:
 logging:
   level:
     # 根日志级别
-    root: INFO
-    # 应用包日志级别
-    com.xiaoce.agent: DEBUG
-    com.xiaoce.agent.auth: DEBUG
-    # Spring框架日志级别
+    root: WARN
+    # 应用包日志级别 - 只显示关键业务日志
+    com.xiaoce.agent: INFO
+    com.xiaoce.agent.auth: INFO
+    # Spring框架日志级别 - 只显示警告和错误
     org.springframework: WARN
-    org.springframework.security: DEBUG
-    org.springframework.web: DEBUG
+    org.springframework.security: WARN
+    org.springframework.web: WARN
     # 数据库相关日志
-    org.hibernate: WARN
-    org.mybatis: DEBUG
+    org.hibernate: ERROR
+    org.mybatis: WARN
     # Redis相关日志
-    org.springframework.data.redis: DEBUG
+    org.springframework.data.redis: WARN
   pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
-    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    # 简洁的控制台日志格式 - 只保留时间、级别和消息
+    console: "%d{HH:mm:ss} %-5level - %msg%n"
+    # 文件日志格式 - 稍微详细一些
+    file: "%d{yyyy-MM-dd HH:mm:ss} %-5level %logger{20} - %msg%n"
   file:
     name: logs/agent.log
   logback:
