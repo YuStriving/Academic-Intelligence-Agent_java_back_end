@@ -2,10 +2,6 @@ package com.xiaoce.agent.auth.domain.vo;
 
 import com.xiaoce.agent.auth.domain.po.User;
 import com.xiaoce.agent.auth.enums.GenderEnum;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
 
 /**
  * 用户信息响应类

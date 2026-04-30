@@ -44,7 +44,6 @@ services:
       TZ: Asia/Shanghai
       REDIS_PASSWORD: "${REDIS_PASSWORD:-123456}"
     ports:
-      # 宿主机 6380 → 容器 6379（本机 6379 常被占用时使用）
       - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data

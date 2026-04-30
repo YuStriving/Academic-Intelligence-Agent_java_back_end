@@ -27,6 +27,8 @@ spring:
       port: ${config.redis.port}
       password: ${config.redis.password}
 
+
+
 server:
   port: 8080
   servlet:
@@ -69,7 +71,7 @@ logging:
 
 auth:
   jwt:
-    issuer: academic-agent
+    issuer: http://academic-agent
     key-id: academic-agent
     private-key: classpath:keys/rsa-private.pem
     public-key: classpath:keys/rsa-public.pem
@@ -91,3 +93,29 @@ mybatis-plus:
   mapper-locations: classpath:mapper/*.xml
   configuration:
     map-underscore-to-camel-case: true
+
+caffine:
+  cache: # 缓存配置
+    max-size: 50000 # 缓存最大数量
+    # 缓存过期时间（分钟）
+    expire-minutes: 5
+    # 热点统计窗口大小（分钟）
+    hot-window-minutes: 5
+    # 热点阈值（窗口内查询次数）
+    hot-threshold: 1000
+    # 预热数量
+    preheat-count: 1000
+  hotkey: #场景 B 时间来到 11:59:50，倒计时即将结束，几千名学生疯狂刷新页面准备抢课。流量瞬间爆炸！
+    window-seconds: 60      # 观察窗口：每 60 秒作为一个统计周期。
+    segment-seconds: 10     # 时间切片：把 60 秒切成 6 份，每 10 秒更新一次统计。用来统计次数，为后续热度阈值做判断
+    level-low: 50           # 低热度阈值：60秒内访问超过 50 次。
+    level-medium: 200       # 中热度阈值：60秒内访问超过 200 次。
+    level-high: 500         # 高热度阈值：60秒内访问超过 500 次。
+    extend-low-seconds: 20    # 如果是低热度：在本地缓存 20 秒。
+    extend-medium-seconds: 60 # 如果是中热度：在本地缓存 60 秒。
+    extend-high-seconds: 120  # 如果是高热度：在本地缓存 120 秒 (2分钟)。
+ai:
+  encryption:
+    # AES加密密钥（必须为16/24/32位字符）
+    # 用于加密存储用户的 API Key 等敏感数据
+    secret-key: ${config.ai.encryption.secret-key}

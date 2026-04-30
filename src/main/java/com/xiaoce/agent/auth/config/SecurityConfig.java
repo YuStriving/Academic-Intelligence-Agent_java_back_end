@@ -2,6 +2,7 @@ package com.xiaoce.agent.auth.config;
 
 import com.xiaoce.agent.auth.security.JwtAuthenticationConverter;
 import com.xiaoce.agent.auth.security.RestAuthenticationEntryPoint;
+import com.xiaoce.agent.auth.filter.ClientTypeFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,6 +13,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -46,6 +48,9 @@ public class SecurityConfig {
     // 依赖注入：自定义JWT认证转换器
     private final JwtAuthenticationConverter jwtAuthenticationConverter;
 
+    // 依赖注入：客户端类型过滤器（识别请求来源）
+    private final ClientTypeFilter clientTypeFilter;
+
     /**
      * 配置安全过滤器链 - 这是整个安全系统的核心配置
      * 
@@ -68,6 +73,10 @@ public class SecurityConfig {
                 // 启用CORS跨域支持：配置允许哪些前端域名访问
                 .cors(c -> c.configurationSource(corsConfigurationSource()))
                 
+                // 添加客户端类型过滤器：在安全过滤器链之前识别客户端类型
+                // 用于区分 Web/App/小程序等不同来源的请求
+                .addFilterBefore(clientTypeFilter, AuthorizationFilter.class)
+                
                 // 设置为无状态会话：服务器不保存用户状态，每次请求都验证JWT
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 
@@ -79,9 +88,11 @@ public class SecurityConfig {
                         // 允许所有OPTIONS请求（CORS预检请求必须放行）
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         
-                        // 公开接口：注册、登录、刷新token不需要认证
+                        // 公开接口：注册、登录、刷新token、发送验证码、重置密码、忘记密码不需要认证
                         .requestMatchers("/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh",
-                                "/api/v1/auth/logout").permitAll()
+                                "/api/v1/auth/logout", "/api/v1/auth/sendCode", "/api/v1/auth/reset/password",
+                                "/api/v1/auth/forget/password"
+                        ).permitAll()
                         
                         // 其他所有接口都需要认证（需要有效的JWT token）
                         .anyRequest().authenticated())
@@ -139,15 +150,25 @@ public class SecurityConfig {
                 "Accept",             // 接受类型
                 "Origin",             // 来源
                 "X-Requested-With",   // 请求类型
+                "X-Client-Type",      // 客户端类型（Web/App/小程序等）✅ 新增
+                "X-Client-Version",   // 客户端版本号 ✅ 新增
                 "Access-Control-Request-Method",   // CORS预检请求
                 "Access-Control-Request-Headers"   // CORS预检请求头
         ));
         
-        // 设置允许前端访问的响应头（自定义响应头）
-        cfg.setExposedHeaders(List.of("X-Total-Count", "X-Page-Number", "X-Page-Size"));
-        
-        // 设置是否允许携带凭证（Cookie等），JWT认证不需要Cookie，设为false
-        cfg.setAllowCredentials(false);
+        // 设置允许前端访问的响应头（自定义响应头 + Cookie相关头）
+        // 必须暴露Set-Cookie头，否则前端无法接收HttpOnly Cookie
+        cfg.setExposedHeaders(List.of(
+                "X-Total-Count",
+                "X-Page-Number",
+                "X-Page-Size",
+                "Set-Cookie",       // 允许前端接收Set-Cookie响应头（用于刷新令牌）
+                "Access-Control-Allow-Credentials"  // 允许前端识别凭证标志
+        ));
+
+        // 设置是否允许携带凭证（Cookie等），JWT双令牌的刷新令牌存储在httpOnly的Cookie中，必须设为true
+        // 重要：当allowCredentials=true时，不能使用setAllowedOriginPatterns("*")，必须明确指定域名
+        cfg.setAllowCredentials(true);
         
         // 设置预检请求缓存时间（秒），减少预检请求频率
         cfg.setMaxAge(3600L);

@@ -6,8 +6,9 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import java.time.LocalDateTime;
 import java.io.Serializable;
 
-import jakarta.validation.constraints.NotBlank;
-import lombok.*;
+import lombok.Builder;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
 
 /**
@@ -16,12 +17,10 @@ import lombok.experimental.Accessors;
  * </p>
  *
  * @author 小策
- * @since 2026-04-22
+ * @since 2026-04-29
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
-@NoArgsConstructor
-@AllArgsConstructor
 @Accessors(chain = true)
 @TableName("users")
 @Builder
@@ -80,7 +79,6 @@ public class User implements Serializable {
      */
     private String bio;
 
-
     /**
      * 创建时间
      */
@@ -90,6 +88,17 @@ public class User implements Serializable {
      * 更新时间
      */
     private LocalDateTime updatedAt;
+
+    /**
+     * 学术ID最后修改时间，用于限制一年内只能修改一次
+     */
+    private LocalDateTime academicIdLastModified;
+
+    /**
+     * 逻辑删除：0-正常, 1-已删除
+     * 数据库类型: BIGINT/TINYINT，存储整数值 0 或 1
+     */
+    private Integer isDeleted;
 
 
 }

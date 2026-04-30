@@ -4,22 +4,69 @@
 
     <sql id="userColumns">
         id, username, email, academic_id, password_hash, nickname, avatar_url,
-        gender, school, bio, status, created_at, updated_at
+        gender, school, bio, created_at, updated_at, academic_id_last_modified,is_deleted
     </sql>
+    <update id="updateAcademicIdIfAllowed">
+        UPDATE users
+        SET academic_id = #{newAcademicId},
+        academic_id_last_modified = #{now},
+        updated_at = #{now}
+        WHERE id = #{userId}
+        AND (academic_id_last_modified IS NULL OR academic_id_last_modified &lt;= #{allowBefore}) AND is_deleted = 0;
+    </update>
+    <update id="updateUserEmail">
+        UPDATE users
+        SET email = #{newEmail},
+            updated_at = CURRENT_TIMESTAMP(3)
+        WHERE id= #{userId} AND is_deleted = 0;
+    </update>
+    <update id="updateProfileSelective">
+        UPDATE users
+        <set>
+            <if test="nickname != null">
+                nickname = #{nickname},
+            </if>
+            <if test="avatarUrl != null">
+                avatar_url = #{avatarUrl},
+            </if>
+            <if test="email != null">
+                email = #{email},
+            </if>
+            <if test="bio != null">
+                bio = #{bio},
+            </if>
+            <if test="gender != null">
+                gender = #{gender},
+            </if>
+            <if test="school != null">
+                school = #{school},
+            </if>
+            <if test="academicIdChanged">
+                academic_id = #{academicId},
+                academic_id_last_modified = #{now},
+            </if>
+            updated_at = #{now}
+        </set>
+        WHERE id = #{userId}
+        <if test="academicIdChanged">
+            AND (academic_id_last_modified IS NULL OR academic_id_last_modified &lt;= #{allowBefore})
+        </if>
+            AND is_deleted = 0;
+    </update>
 
     <select id="existsByUsername" resultType="java.lang.Boolean">
-        SELECT EXISTS(SELECT 1 FROM users WHERE username = #{username})
+        SELECT EXISTS(SELECT 1 FROM users WHERE username = #{username} AND is_deleted = 0)
     </select>
 
     <select id="existsByEmail" resultType="java.lang.Boolean">
-        SELECT EXISTS(SELECT 1 FROM users WHERE email = #{email})
+        SELECT EXISTS(SELECT 1 FROM users WHERE email = #{email} AND is_deleted = 0)
     </select>
 
     <select id="findByEmail" resultType="com.xiaoce.agent.auth.domain.po.User">
         SELECT
             <include refid="userColumns"/>
         FROM users
-        WHERE email = #{email}
+        WHERE email = #{email} AND is_deleted = 0
         LIMIT 1
     </select>
 
@@ -27,7 +74,7 @@
         SELECT
             <include refid="userColumns"/>
         FROM users
-        WHERE username = #{username}
+        WHERE username = #{username} AND is_deleted = 0
         LIMIT 1
     </select>
 

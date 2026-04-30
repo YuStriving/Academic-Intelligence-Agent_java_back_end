@@ -1,10 +1,9 @@
 package com.xiaoce.agent.auth.domain.dto;
 
+import com.xiaoce.agent.auth.enums.ValidateCodeSendSceneEnums;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
-import lombok.Data;
 
 
 public record RegisterRequest(
@@ -19,7 +18,11 @@ public record RegisterRequest(
         String password,
 
         @AssertTrue(message = "Please agree to terms")
-        boolean agreeTerms
+        boolean agreeTerms,
+
+        @NotBlank(message = "ValidateCode is required")
+        String validateCode
+
 ) {
 
 

@@ -1,12 +1,11 @@
 package com.xiaoce.agent.auth.service;
 
-import com.xiaoce.agent.auth.domain.dto.LoginRequest;
-import com.xiaoce.agent.auth.domain.dto.PasswordResetRequest;
-import com.xiaoce.agent.auth.domain.dto.RefreshRequest;
-import com.xiaoce.agent.auth.domain.dto.RegisterRequest;
+import com.xiaoce.agent.auth.domain.dto.*;
 import com.xiaoce.agent.auth.domain.vo.AuthResponse;
+import com.xiaoce.agent.auth.domain.vo.SendCodeResponse;
 import com.xiaoce.agent.auth.domain.vo.TokenPairResponse;
 import com.xiaoce.agent.auth.domain.vo.UserInfoResponse;
+import com.xiaoce.agent.auth.enums.ClientType;
 import jakarta.validation.Valid;
 
 /**
@@ -19,20 +18,24 @@ import jakarta.validation.Valid;
  */
 public interface IAuthService {
 
-    AuthResponse login(LoginRequest req);
+    AuthResponse login(LoginRequest req, ClientType clientType);
 
-    AuthResponse register(RegisterRequest req);
+    AuthResponse register(RegisterRequest req ,ClientType clientType);
 
-    void logout(String refreshToken);
+    void logout(String refreshToken,ClientType clientType);
 
-    TokenPairResponse refreshToken(@Valid RefreshRequest request);
+    TokenPairResponse refreshToken(@Valid RefreshRequest request,ClientType clientType);
 
     UserInfoResponse me(Long userId);
 
-    void logoutAll(String refreshToken);
+    void logoutAll(String refreshToken,ClientType clientType);
     // TODO 给管理端进行调用的
-    void banUserPermanent(Long userId);
+    void banUserPermanent(Long userId,ClientType clientType);
 
 
-    void resetPassword(@Valid PasswordResetRequest request);
+    void resetPassword(@Valid PasswordResetRequest request,ClientType clientType);
+
+    SendCodeResponse sendValidateCode(@Valid SendCodeRequest request);
+
+    void forgetPassword(@Valid ForgetPasswordRequest request,ClientType clientType);
 }

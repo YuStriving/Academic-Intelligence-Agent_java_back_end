@@ -82,6 +82,9 @@ yarn-error.log*
 .env.test.local
 .env.production.local
 
+# Documentation (不上传到GitHub - 包含敏感设计文档和架构方案)
+docs/
+
 # Temporary files
 tmp/
 temp/

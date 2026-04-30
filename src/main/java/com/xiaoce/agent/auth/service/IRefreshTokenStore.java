@@ -1,5 +1,7 @@
 package com.xiaoce.agent.auth.service;
 
+import com.xiaoce.agent.auth.enums.ClientType;
+
 import java.time.Instant;
 import java.util.Set;
 
@@ -25,11 +27,23 @@ public interface IRefreshTokenStore {
     /**
      * 保存刷新令牌
      * 
-     * @param userId 用户ID
-     * @param tokenId 令牌ID (jti)
-     * @param ttl 过期时间
+
+ * 此方法用于将用户的刷新令牌信息保存到系统中
+ *
+     * @param userId 用户ID - 用于标识哪个用户的令牌
+     * @param tokenId 令牌ID (jti) - 令牌的唯一标识符
+     * @param ttl 过期时间 - 令牌的存活时间，使用Instant类型表示精确时间点
+ * @param clientType 客户端类型 - 指定使用此令牌的客户端类型
+ *
+ * 使用场景：
+ * 1. 用户登录成功后生成刷新令牌时调用
+ * 2. 需要更新或延长令牌有效期时调用
+ *
+ * 注意事项：
+ * - 同一用户可能会有多个有效的刷新令牌
+ * - 每个令牌都应包含完整的用户信息和过期时间
      */
-    void saveRefreshToken(Long userId, String tokenId, Instant ttl);
+    void saveRefreshToken(Long userId, String tokenId, Instant ttl,ClientType clientType);
 
     /**
      * 验证刷新令牌
@@ -44,7 +58,7 @@ public interface IRefreshTokenStore {
      * @param tokenId 令牌ID (jti)
      * @return 令牌是否有效
      */
-    boolean validateRefreshToken(Long userId, String tokenId);
+    boolean validateRefreshToken(Long userId, String tokenId, ClientType clientType);
 
     /**
      * 删除单个刷新令牌
@@ -54,7 +68,7 @@ public interface IRefreshTokenStore {
      * @param userId 用户ID
      * @param tokenId 令牌ID (jti)
      */
-    void removeRefreshToken(Long userId, String tokenId);
+    void removeRefreshToken(Long userId, String tokenId,ClientType clientType);
 
     /**
      * 删除用户所有刷新令牌
@@ -63,38 +77,19 @@ public interface IRefreshTokenStore {
      * 
      * @param userId 用户ID
      */
-    void removeUserAllRefreshToken(Long userId);
+    void removeUserAllRefreshToken(Long userId,ClientType clientType);
 
     /**
-     * 获取用户有效的刷新令牌列表（带惰性清理）
-     * 
-     * <p>在获取用户令牌列表时，自动清理已过期的令牌。
-     * 这是方案C的核心方法，实现惰性删除策略。
-     * 
-     * <p>工作流程：
-     * <ol>
-     *   <li>获取用户Set中的所有令牌ID</li>
-     *   <li>检查每个令牌的过期标记是否存在</li>
-     *   <li>将过期令牌从Set和Hash中删除</li>
-     *   <li>返回剩余的有效令牌ID</li>
-     * </ol>
-     * 
-     * <p>使用场景：
-     * <ul>
-     *   <li>全设备登出时需要获取用户所有令牌</li>
-     *   <li>定期维护用户令牌数据</li>
-     * </ul>
-     * 
-     * @param userId 用户ID
-     * @return 有效的令牌ID集合
-     */
-    Set<String> getUserValidTokens(Long userId);
-
-    /**
-     * 增量清理全局过期refresh token索引
+     * 清理指定客户端类型的超额令牌
      *
-     * @param batchSize 单次清理条数
-     * @return 实际清理条数
+     * <p>当同一用户在同一客户端类型下有多个刷新令牌时（如多次登录），
+     * 此方法会删除最旧的令牌，只保留最新的N个。
+     * 这可以防止令牌堆积问题。
+     *
+     * @param userId 用户ID
+     * @param clientType 客户端类型（WEB、APP等）
+     * @param maxToKeep 保留的最大数量（通常为1或3）
+     * @return 实际清理的令牌数量
      */
-    int cleanupExpiredTokens(int batchSize);
+    int cleanupExcessTokens(Long userId, ClientType clientType, int maxToKeep);
 }
