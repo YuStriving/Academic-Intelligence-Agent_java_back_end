@@ -73,12 +73,12 @@ public enum ModelProviderEnum {
     }
 
     /**
-     * Jackson序列化：输出code值给前端
+     * Jackson序列化：输出name字符串给前端（语义化名称）
      *
-     * @return 枚举编码
+     * @return 枚举名称（"DeepSeek" 或 "Tongyi"）
      */
     @JsonValue
-    public int getCodeValue() {
-        return this.code;
+    public String getNameValue() {
+        return this.name;
     }
 }

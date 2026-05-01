@@ -31,16 +31,16 @@ import static com.xiaoce.agent.auth.common.constant.AuthRedisConstants.USER_TOKE
 import static com.xiaoce.agent.auth.common.utils.UserInfoUtils.*;
 
 /**
- * 认证服务核心实现
+ * 认证服务核心实现类
  *
- * <p>职责：处理用户注册、登录、令牌管理、账号安全等所有认证相关业务。
+ * <p>职责：处理用户注册、登录、令牌管理、密码安全等所有认证相关业务</p>
  *
- * <p>设计要点：
+ * <p>设计要点：</p>
  * <ul>
- *   <li><b>JWT双令牌机制</b>：AccessToken(短期) + RefreshToken(长期)，支持无感知续期</li>
- *   <li><b>令牌版本号</b>：通过Redis递增版本号实现全设备登出</li>
+ *   <li><b>JWT双令牌机制</b>：AccessToken(短期) + RefreshToken(长期)，支持无感续期</li>
+ *   <li><b>令牌版本号</b>：通过Redis递增版本号实现全局设备强制登出</li>
  *   <li><b>多客户端支持</b>：Web/App等不同客户端类型可独立管理令牌</li>
- *   <li><b>安全防护</b>：用户封禁使用Bitmap存储，密码BCrypt加密，验证码防刷</li>
+ *   <li><b>安全防护</b>：用户封禁使用Bitmap存储，密码BCrypt加密，验证码限流</li>
  * </ul>
  */
 @Slf4j
@@ -58,7 +58,7 @@ public class AuthServiceImpl implements IAuthService {
     /**
      * 用户注册
      *
-     * <p>流程：输入校验 → 唯一性检查 → 验证码验证 → 创建用户 → 签发令牌
+     * <p>流程：输入校验 → 唯一性检查 → 验证码校验 → 创建用户 → 签发令牌</p>
      *
      * @param req 注册请求（用户名、邮箱、密码、验证码）
      * @param clientType 客户端类型（Web/App）
@@ -113,7 +113,7 @@ public class AuthServiceImpl implements IAuthService {
         long tokenVersion = getCurrentTokenVersion(user.getId());
         TokenPair tokenPair = jwtTokenService.issueTokenPair(user, tokenVersion);
 
-        // 预清理：主动清理该客户端类型的超额令牌（只保留最新的1个），防止令牌堆积
+        // 预清理：主动清理该客户端类型的过期令牌（只保留最新的1个），防止令牌堆积
         refreshTokenRedisStore.cleanupExcessTokens(user.getId(), clientType, 1);
 
         refreshTokenRedisStore.saveRefreshToken(user.getId(), tokenPair.refreshTokenId(), tokenPair.refreshTokenExpiresAt(), clientType);
@@ -124,7 +124,7 @@ public class AuthServiceImpl implements IAuthService {
     /**
      * 用户登录
      *
-     * <p>支持邮箱或用户名登录。为防止枚举攻击，用户不存在和密码错误返回相同错误码。
+     * <p>支持邮箱或用户名登录。为防止枚举攻击，用户不存在和密码错误返回相同错误码。</p>
      *
      * @param req 登录凭证（邮箱/用户名 + 密码）
      * @param clientType 客户端类型
@@ -160,7 +160,7 @@ public class AuthServiceImpl implements IAuthService {
         long tokenVersion = getCurrentTokenVersion(user.getId());
         TokenPair tokenPair = jwtTokenService.issueTokenPair(user, tokenVersion);
 
-        // 预清理：主动清理该客户端类型的超额令牌（只保留最新的1个），防止令牌堆积
+        // 预清理：主动清理该客户端类型的过期令牌（只保留最新的1个），防止令牌堆积
         refreshTokenRedisStore.cleanupExcessTokens(user.getId(), clientType, 1);
 
         refreshTokenRedisStore.saveRefreshToken(user.getId(), tokenPair.refreshTokenId(), tokenPair.refreshTokenExpiresAt(), clientType);
@@ -171,8 +171,8 @@ public class AuthServiceImpl implements IAuthService {
     /**
      * 刷新访问令牌
      *
-     * <p>当AccessToken过期时调用。采用"先创建后删除"策略保证原子性：
-     * 即使删除旧RT失败，用户仍可用新RT继续访问。
+     * <p>当AccessToken过期时调用。采用"先创建后删除"的原子性原则：
+     * 即使删除时RT失效，用户仍可用新RT继续访问。</p>
      *
      * @param req 包含RefreshToken的刷新请求
      * @param clientType 客户端类型
@@ -181,33 +181,30 @@ public class AuthServiceImpl implements IAuthService {
     @Transactional
     @Override
     public TokenPairResponse refreshToken(RefreshRequest req, ClientType clientType) {
-        // 1. 解析并验证RefreshToken签名和有效期
         Jwt jwt = jwtTokenService.parseAndVerify(req.refreshToken(), JwtTokenService.TYPE_REFRESH);
         long userId = jwtTokenService.parseSubjectAsUserId(jwt.getSubject());
         String jti = jwtTokenService.extractJwtId(jwt);
 
-        // 2. 验证RT是否在Redis中存在且未被使用
         if (!refreshTokenRedisStore.validateRefreshToken(userId, jti, clientType)) {
             throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN);
         }
 
-        // 3. 版本号校验（防止被全设备登出的旧RT被滥用）
         long currentVersion = getCurrentTokenVersion(userId);
         jwtTokenService.assertTokenVersion(jwt, currentVersion, JwtTokenService.TYPE_REFRESH);
 
-        // 4. 用户状态检查
         User user = Optional.ofNullable(usersMapper.selectById(userId))
                 .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN));
         if (isUserBannedByBitmap(userId)) {
             throw new BusinessException(ErrorCode.FORBIDDEN, "账号已被封禁");
         }
 
-        // 5. 先生成新令牌对（原子性保障）
+        boolean removed = refreshTokenRedisStore.removeRefreshToken(userId, jti, clientType);
+        if (!removed) {
+            throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN);
+        }
+
         TokenPair tokenPair = jwtTokenService.issueTokenPair(user, currentVersion);
         refreshTokenRedisStore.saveRefreshToken(userId, tokenPair.refreshTokenId(), tokenPair.refreshTokenExpiresAt(), clientType);
-
-        // 6. 最后失效旧RT（即使失败也不影响新RT的使用）
-        refreshTokenRedisStore.removeRefreshToken(userId, jti, clientType);
 
         return TokenPairResponse.toMapTokenPairResponse(tokenPair);
     }
@@ -230,7 +227,7 @@ public class AuthServiceImpl implements IAuthService {
      * 单设备登出
      *
      * <p>仅使当前设备的RefreshToken失效，其他设备不受影响。
-     * 注意：由于JWT无状态特性，AccessToken在过期前仍有效。
+     * 注意：由于JWT无状态特性，AccessToken在过期前仍然有效。</p>
      *
      * @param refreshToken 当前设备的RefreshToken
      * @param clientType 客户端类型
@@ -247,18 +244,20 @@ public class AuthServiceImpl implements IAuthService {
             throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN, "令牌无效或已过期");
         }
 
-        // 版本号校验
         long currentVersion = getCurrentTokenVersion(userId);
         jwtTokenService.assertTokenVersion(jwt, currentVersion, JwtTokenService.TYPE_REFRESH);
 
-        refreshTokenRedisStore.removeRefreshToken(userId, jti, clientType);
+        boolean removed = refreshTokenRedisStore.removeRefreshToken(userId, jti, clientType);
+        if (!removed) {
+            throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN, "令牌无效或已过期");
+        }
         log.debug("单设备登出成功 - 用户ID: {}, JTI: {}", userId, jti);
     }
 
     /**
      * 全设备登出
      *
-     * <p>通过递增令牌版本号 + 清除所有RT实现：
+     * <p>通过递增令牌版本号 + 清除所有RT实现：</p>
      * - 版本号+1后，所有旧版本的JWT（包括未过期的AccessToken）都会在校验时被拒绝
      * - 同时清除Redis中的所有RT，加速失效过程
      *
@@ -282,14 +281,14 @@ public class AuthServiceImpl implements IAuthService {
         // 关键：先递增版本号，再清除RT（顺序不能反）
         bumpTokenVersion(userId);
         refreshTokenRedisStore.removeUserAllRefreshToken(userId, clientType);
-        log.info("全设备登出成功 - 用户ID: {}, 新版本: {}", userId, currentVersion + 1);
+        log.info("全设备登出成功 - 用户ID: {}, 新版本号: {}", userId, currentVersion + 1);
     }
 
     /**
      * 永久封禁用户
      *
      * <p>效果：无法登录 + 所有令牌失效 + RT全部清除
-     * 封禁状态存储在Redis Bitmap中，重启不丢失。
+     * 封禁状态存储在Redis Bitmap中，重启不丢失。</p>
      *
      * @param userId 目标用户ID
      * @param clientType 客户端类型
@@ -305,7 +304,7 @@ public class AuthServiceImpl implements IAuthService {
             throw new BusinessException(ErrorCode.NOT_FOUND, "用户不存在");
         }
 
-        // 三管齐下：标记封禁 + 版本号+1（使旧令牌失效） + 清除RT
+        // 三步操作下：标记封禁 + 版本号+1（使令牌失效）+ 清除RT
         markUserBannedInBitmap(userId);
         bumpTokenVersion(userId);
         refreshTokenRedisStore.removeUserAllRefreshToken(userId, clientType);
@@ -315,7 +314,7 @@ public class AuthServiceImpl implements IAuthService {
     /**
      * 已登录用户重置密码
      *
-     * <p>需要提供旧密码 + 验证码 + 新密码。重置后强制全设备登出。
+     * <p>需提供旧密码 + 验证码 + 新密码。重置后强制全设备重新登录。</p>
      *
      * @param request 重置密码请求
      * @param clientType 客户端类型
@@ -372,10 +371,10 @@ public class AuthServiceImpl implements IAuthService {
     /**
      * 发送验证码
      *
-     * <p>根据不同场景决定发送目标：
+     * <p>根据不同场景决定发送目标：</p>
      * - 注册：发送到输入的新邮箱
-     * - 修改邮箱/学术ID：发送到数据库中的当前邮箱（证明身份所有权）
-     * - 忘记/重置密码：发送到数据库中的当前邮箱
+     * - 修改邮箱/学术ID：发送到数据库中的原邮箱（证明身份所有权）
+     * - 重置/忘记密码：发送到数据库中的原邮箱
      *
      * @param request 包含标识和场景的请求
      * @return 发送结果
@@ -403,12 +402,12 @@ public class AuthServiceImpl implements IAuthService {
                 ? usersMapper.findByEmail(identify)
                 : usersMapper.findByUsername(identify);
 
-        // 场景化路由：确定验证码发送的目标邮箱
+        // 场景路由：确定验证码发送的目标邮箱
         String email;
         switch (scene) {
             case REGISTER:
                 if (user != null) {
-                    throw new BusinessException(ErrorCode.BAD_REQUEST, "该账户已存在");
+                    throw new BusinessException(ErrorCode.BAD_REQUEST, "该用户已存在");
                 }
                 email = identify;  // 注册场景用新邮箱
                 break;
@@ -424,7 +423,7 @@ public class AuthServiceImpl implements IAuthService {
                 if (user == null) {
                     throw new BusinessException(ErrorCode.BAD_REQUEST, "请先登录");
                 }
-                email = user.getEmail();  // 用当前邮箱验证身份
+                email = user.getEmail();  // 用原邮箱验证身份
                 break;
             case DELETEACCOUNT:
                 if (user == null) {
@@ -442,7 +441,7 @@ public class AuthServiceImpl implements IAuthService {
     /**
      * 忘记密码（未登录状态）
      *
-     * <p>通过验证码 + 新密码重置，无需旧密码。重置后强制全设备登出。
+     * <p>通过验证码 + 新密码重置，无需旧密码。重置后强制全设备重新登录。</p>
      *
      * @param request 包含标识、验证码和新密码的请求
      * @param clientType 客户端类型
@@ -482,7 +481,7 @@ public class AuthServiceImpl implements IAuthService {
     /**
      * 密码强度校验
      *
-     * <p>规则：非空 + 长度限制（配置） + 必须包含字母和数字
+     * <p>规则：非空 + 长度限制（可配置） + 必须包含字母和数字</p>
      */
     private void validatePassword(String password) {
         if (!StringUtils.hasText(password)) {
@@ -510,7 +509,7 @@ public class AuthServiceImpl implements IAuthService {
      * 获取当前令牌版本号
      *
      * <p>用于全设备登出机制：每次logoutAll时版本号+1，
-     * 所有携带旧版本号的JWT都会在校验时被拒绝。
+     * 所有携带旧版本号的JWT都会在校验时被拒绝。</p>
      *
      * @return 当前版本号（默认0）
      */
@@ -537,7 +536,7 @@ public class AuthServiceImpl implements IAuthService {
      * 在Redis Bitmap中标记用户为已封禁
      *
      * <p>选择Bitmap的原因：内存效率高（1个用户仅占1bit），
-     * 适合存储大量用户的封禁状态。
+     * 适合存储大量用户的封禁状态。</p>
      */
     private void markUserBannedInBitmap(Long userId) {
         redisTemplate.opsForValue().setBit(USER_IS_BANNED_BITMAP_KEY, userId, true);

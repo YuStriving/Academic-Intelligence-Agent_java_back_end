@@ -24,6 +24,18 @@ public interface IAuthService {
 
     void logout(String refreshToken,ClientType clientType);
 
+    /**
+     *  // 最简单的测试方式（不依赖脚本）
+     *  fetch('/api/v1/auth/refresh', {
+     *   method: 'POST',
+     *   credentials: 'include',
+     *   headers: {'Content-Type': 'application/json'},
+     *   body: JSON.stringify({refreshToken: 'your-token-here'})
+     * }).then(r => r.json()).then(console.log)
+     * @param request
+     * @param clientType
+     * @return
+     */
     TokenPairResponse refreshToken(@Valid RefreshRequest request,ClientType clientType);
 
     UserInfoResponse me(Long userId);

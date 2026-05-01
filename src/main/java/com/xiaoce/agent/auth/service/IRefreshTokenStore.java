@@ -68,7 +68,7 @@ public interface IRefreshTokenStore {
      * @param userId 用户ID
      * @param tokenId 令牌ID (jti)
      */
-    void removeRefreshToken(Long userId, String tokenId,ClientType clientType);
+    boolean removeRefreshToken(Long userId, String tokenId,ClientType clientType);
 
     /**
      * 删除用户所有刷新令牌
@@ -82,7 +82,7 @@ public interface IRefreshTokenStore {
     /**
      * 清理指定客户端类型的超额令牌
      *
-     * <p>当同一用户在同一客户端类型下有多个刷新令牌时（如多次登录），
+     * <p>当同一用户在同一客户端类型下有多个刷新令牌时（如多次登录,刷新令牌），
      * 此方法会删除最旧的令牌，只保留最新的N个。
      * 这可以防止令牌堆积问题。
      *
